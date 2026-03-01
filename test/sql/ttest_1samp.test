@@ -1,0 +1,89 @@
+# name: test/sql/ttest_1samp.test
+# description: One-sample t-test
+# group: [stats_duck]
+
+require stats_duck
+
+# Basic one-sample t-test: sample with known properties
+# sample = [2, 4, 6, 8, 10], mean=6, sd=sqrt(10), n=5
+# t = (6-0)/(sqrt(10)/sqrt(5)) = 6/sqrt(2) ≈ 4.2426
+query ITTTTTTTT
+SELECT test_type,
+       ROUND(t_statistic, 4) as t_stat,
+       ROUND(df, 1) as df,
+       ROUND(p_value, 4) as p_val,
+       alternative,
+       ROUND(mean_diff, 4) as mean_diff,
+       ROUND(ci_lower, 4) as ci_lower,
+       ROUND(ci_upper, 4) as ci_upper,
+       ROUND(cohens_d, 4) as cohens_d
+FROM ttest_1samp([2.0, 4.0, 6.0, 8.0, 10.0])
+----
+One-sample	4.2426	4.0	0.0132	two-sided	6.0	2.0719	9.9281	1.8974
+
+# Test with explicit mu
+query TTT
+SELECT test_type,
+       ROUND(t_statistic, 4) as t_stat,
+       ROUND(p_value, 4) as p_val
+FROM ttest_1samp([2.0, 4.0, 6.0, 8.0, 10.0], mu := 6.0)
+----
+One-sample	0.0	1.0
+
+# Test with custom alpha (99% CI is wider)
+query TT
+SELECT ROUND(ci_lower, 4), ROUND(ci_upper, 4)
+FROM ttest_1samp([2.0, 4.0, 6.0, 8.0, 10.0], alpha := 0.01)
+----
+0.3093	11.6907
+
+# One-sided test: alternative = 'greater'
+query TTT
+SELECT alternative,
+       ROUND(t_statistic, 4) as t_stat,
+       ROUND(p_value, 4) as p_val
+FROM ttest_1samp([2.0, 4.0, 6.0, 8.0, 10.0], alternative := 'greater')
+----
+greater	4.2426	0.0066
+
+# One-sided test: alternative = 'less'
+query TTT
+SELECT alternative,
+       ROUND(t_statistic, 4) as t_stat,
+       ROUND(p_value, 4) as p_val
+FROM ttest_1samp([2.0, 4.0, 6.0, 8.0, 10.0], alternative := 'less')
+----
+less	4.2426	0.9934
+
+# Test with NULLs in list (should be silently skipped)
+query TT
+SELECT ROUND(t_statistic, 4) as t_stat,
+       ROUND(df, 1) as df
+FROM ttest_1samp([2.0, NULL, 4.0, 6.0, NULL, 8.0, 10.0])
+----
+4.2426	4.0
+
+# Test with subquery pattern
+query TT
+SELECT ROUND(t_statistic, 4), ROUND(p_value, 4)
+FROM ttest_1samp((SELECT LIST(x::DOUBLE) FROM (VALUES (2), (4), (6), (8), (10)) AS t(x)), mu := 5.0)
+----
+0.7071	0.5187
+
+# Error: too few observations
+statement error
+SELECT * FROM ttest_1samp([1.0])
+----
+One-sample t-test requires at least 2 observations
+
+# Error: invalid alpha
+statement error
+SELECT * FROM ttest_1samp([1.0, 2.0], alpha := 0.0)
+----
+alpha must be between 0 and 1
+
+# Error: invalid alternative
+statement error
+SELECT * FROM ttest_1samp([1.0, 2.0], alternative := 'invalid')
+----
+alternative must be 'two-sided', 'less', or 'greater'

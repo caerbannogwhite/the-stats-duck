@@ -1,0 +1,70 @@
+# name: test/sql/ttest_2samp.test
+# description: Two-sample t-test (Welch's and Student's)
+# group: [stats_duck]
+
+require stats_duck
+
+# Welch's t-test (default): unequal variances
+# group A = [1, 2, 3, 4, 5], group B = [3, 4, 5, 6, 7]
+# Welch's df is non-integer
+query ITTTTTTTT
+SELECT test_type,
+       ROUND(t_statistic, 4) as t_stat,
+       ROUND(df, 4) as df,
+       ROUND(p_value, 4) as p_val,
+       alternative,
+       ROUND(mean_diff, 4) as mean_diff,
+       ROUND(ci_lower, 4) as ci_lower,
+       ROUND(ci_upper, 4) as ci_upper,
+       ROUND(cohens_d, 4) as cohens_d
+FROM ttest_2samp([1.0, 2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, 6.0, 7.0])
+----
+Welch Two-sample	-2.8284	8.0	0.0222	two-sided	-2.0	-3.6309	-0.3691	-1.2649
+
+# Same data with equal_var=true gives Student's test with integer df
+query ITT
+SELECT test_type,
+       ROUND(t_statistic, 4) as t_stat,
+       ROUND(df, 1) as df
+FROM ttest_2samp([1.0, 2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, 6.0, 7.0], equal_var := true)
+----
+Student Two-sample	-2.8284	8.0
+
+# Groups with different variances — Welch's df should be non-integer
+query TT
+SELECT test_type,
+       ROUND(df, 4) as df
+FROM ttest_2samp([1.0, 2.0, 3.0], [10.0, 20.0, 30.0, 40.0])
+----
+Welch Two-sample	3.1638
+
+# One-sided: is group A less than group B?
+query TTT
+SELECT alternative,
+       ROUND(t_statistic, 4) as t_stat,
+       ROUND(p_value, 4) as p_val
+FROM ttest_2samp([1.0, 2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, 6.0, 7.0], alternative := 'less')
+----
+less	-2.8284	0.0111
+
+# Subquery pattern
+query TT
+SELECT ROUND(t_statistic, 4), ROUND(p_value, 4)
+FROM ttest_2samp(
+    (SELECT LIST(x::DOUBLE) FROM (VALUES (1), (2), (3), (4), (5)) AS t(x)),
+    (SELECT LIST(x::DOUBLE) FROM (VALUES (3), (4), (5), (6), (7)) AS t(x))
+)
+----
+-2.8284	0.0222
+
+# Error: too few observations in one group
+statement error
+SELECT * FROM ttest_2samp([1.0], [3.0, 4.0, 5.0])
+----
+Two-sample t-test requires at least 2 observations per group
+
+# Error: invalid alternative
+statement error
+SELECT * FROM ttest_2samp([1.0, 2.0], [3.0, 4.0], alternative := 'wrong')
+----
+alternative must be 'two-sided', 'less', or 'greater'

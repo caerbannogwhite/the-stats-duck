@@ -1,0 +1,20 @@
+# Build
+build/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# vcpkg
+vcpkg_installed/
+
+# Claude
+.claude/
