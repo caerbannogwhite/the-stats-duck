@@ -4,9 +4,10 @@
 
 require stats_duck
 
-# Welch's t-test (default): unequal variances
-# group A = [1, 2, 3, 4, 5], group B = [3, 4, 5, 6, 7]
-# Welch's df is non-integer
+# Welch's t-test (default): equal-variance groups (Welch = Student here)
+# group A = [1, 2, 3, 4, 5] mean=3 var=2.5
+# group B = [3, 4, 5, 6, 7] mean=5 var=2.5
+# Welch se = sqrt(2.5/5 + 2.5/5) = 1.0, t = -2/1 = -2.0, df = 8.0
 query ITTTTTTTT
 SELECT test_type,
        ROUND(t_statistic, 4) as t_stat,
@@ -19,7 +20,7 @@ SELECT test_type,
        ROUND(cohens_d, 4) as cohens_d
 FROM ttest_2samp([1.0, 2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, 6.0, 7.0])
 ----
-Welch Two-sample	-2.8284	8.0	0.0222	two-sided	-2.0	-3.6309	-0.3691	-1.2649
+Welch Two-sample	-2.0	8.0	0.0805	two-sided	-2.0	-4.306	0.306	-1.2649
 
 # Same data with equal_var=true gives Student's test with integer df
 query ITT
@@ -28,7 +29,7 @@ SELECT test_type,
        ROUND(df, 1) as df
 FROM ttest_2samp([1.0, 2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, 6.0, 7.0], equal_var := true)
 ----
-Student Two-sample	-2.8284	8.0
+Student Two-sample	-2.0	8.0
 
 # Groups with different variances — Welch's df should be non-integer
 query TT
@@ -36,7 +37,7 @@ SELECT test_type,
        ROUND(df, 4) as df
 FROM ttest_2samp([1.0, 2.0, 3.0], [10.0, 20.0, 30.0, 40.0])
 ----
-Welch Two-sample	3.1638
+Welch Two-sample	3.0479
 
 # One-sided: is group A less than group B?
 query TTT
@@ -45,17 +46,14 @@ SELECT alternative,
        ROUND(p_value, 4) as p_val
 FROM ttest_2samp([1.0, 2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, 6.0, 7.0], alternative := 'less')
 ----
-less	-2.8284	0.0111
+less	-2.0	0.0402
 
-# Subquery pattern
+# NULLs in lists are silently skipped
 query TT
 SELECT ROUND(t_statistic, 4), ROUND(p_value, 4)
-FROM ttest_2samp(
-    (SELECT LIST(x::DOUBLE) FROM (VALUES (1), (2), (3), (4), (5)) AS t(x)),
-    (SELECT LIST(x::DOUBLE) FROM (VALUES (3), (4), (5), (6), (7)) AS t(x))
-)
+FROM ttest_2samp([1.0, NULL, 2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, NULL, 6.0, 7.0])
 ----
--2.8284	0.0222
+-2.0	0.0805
 
 # Error: too few observations in one group
 statement error

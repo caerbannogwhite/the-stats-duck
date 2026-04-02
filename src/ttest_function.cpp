@@ -11,12 +11,10 @@ namespace duckdb {
 
 struct TTestBindData : public FunctionData {
 	stats_duck::TTestResult result;
-	bool finished = false;
 
 	unique_ptr<FunctionData> Copy() const override {
 		auto copy = make_uniq<TTestBindData>();
 		copy->result = result;
-		copy->finished = finished;
 		return std::move(copy);
 	}
 
@@ -26,6 +24,14 @@ struct TTestBindData : public FunctionData {
 		       result.p_value == other.result.p_value;
 	}
 };
+
+struct TTestGlobalState : public GlobalTableFunctionState {
+	bool finished = false;
+};
+
+static unique_ptr<GlobalTableFunctionState> TTestInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
+	return make_uniq<TTestGlobalState>();
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -115,13 +121,13 @@ static void SetTTestOutputSchema(vector<LogicalType> &return_types, vector<strin
 // ─── Execute (shared) ───────────────────────────────────────────────────────
 
 static void TTestExecute(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
-	auto &bind_data = data.bind_data->Cast<TTestBindData>();
-	if (bind_data.finished) {
+	auto &state = data.global_state->Cast<TTestGlobalState>();
+	if (state.finished) {
 		return;
 	}
-	bind_data.finished = true;
+	state.finished = true;
 
-	auto &r = bind_data.result;
+	auto &r = data.bind_data->Cast<TTestBindData>().result;
 	output.SetCardinality(1);
 	output.SetValue(0, 0, Value(r.test_type));
 	output.SetValue(1, 0, Value(r.t_statistic));
@@ -154,7 +160,8 @@ static unique_ptr<FunctionData> TTest1SampBind(ClientContext &context, TableFunc
 }
 
 void RegisterTTest1Samp(ExtensionLoader &loader) {
-	TableFunction func("ttest_1samp", {LogicalType::LIST(LogicalType::DOUBLE)}, TTestExecute, TTest1SampBind);
+	TableFunction func("ttest_1samp", {LogicalType::LIST(LogicalType::DOUBLE)}, TTestExecute, TTest1SampBind,
+	                   TTestInitGlobal);
 	func.named_parameters["mu"] = LogicalType::DOUBLE;
 	func.named_parameters["alpha"] = LogicalType::DOUBLE;
 	func.named_parameters["alternative"] = LogicalType::VARCHAR;
@@ -183,7 +190,7 @@ static unique_ptr<FunctionData> TTest2SampBind(ClientContext &context, TableFunc
 
 void RegisterTTest2Samp(ExtensionLoader &loader) {
 	TableFunction func("ttest_2samp", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
-	                   TTestExecute, TTest2SampBind);
+	                   TTestExecute, TTest2SampBind, TTestInitGlobal);
 	func.named_parameters["equal_var"] = LogicalType::BOOLEAN;
 	func.named_parameters["alpha"] = LogicalType::DOUBLE;
 	func.named_parameters["alternative"] = LogicalType::VARCHAR;
@@ -212,7 +219,7 @@ static unique_ptr<FunctionData> TTestPairedBind(ClientContext &context, TableFun
 void RegisterTTestPaired(ExtensionLoader &loader) {
 	TableFunction func("ttest_paired",
 	                   {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)}, TTestExecute,
-	                   TTestPairedBind);
+	                   TTestPairedBind, TTestInitGlobal);
 	func.named_parameters["alpha"] = LogicalType::DOUBLE;
 	func.named_parameters["alternative"] = LogicalType::VARCHAR;
 	loader.RegisterFunction(func);

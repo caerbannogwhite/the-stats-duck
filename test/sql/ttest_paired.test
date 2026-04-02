@@ -58,7 +58,7 @@ FROM ttest_paired(
     alpha := 0.01
 )
 ----
--2.7866	-0.3734
+-2.8441	-0.3159
 
 # Error: unequal lengths
 statement error

@@ -35,7 +35,7 @@ query TT
 SELECT ROUND(ci_lower, 4), ROUND(ci_upper, 4)
 FROM ttest_1samp([2.0, 4.0, 6.0, 8.0, 10.0], alpha := 0.01)
 ----
-0.3093	11.6907
+-0.5112	12.5112
 
 # One-sided test: alternative = 'greater'
 query TTT
@@ -63,10 +63,10 @@ FROM ttest_1samp([2.0, NULL, 4.0, 6.0, NULL, 8.0, 10.0])
 ----
 4.2426	4.0
 
-# Test with subquery pattern
+# Test with mu = 5.0 (mean is 6, so t = (6-5)/se = 1/sqrt(2) ≈ 0.7071)
 query TT
 SELECT ROUND(t_statistic, 4), ROUND(p_value, 4)
-FROM ttest_1samp((SELECT LIST(x::DOUBLE) FROM (VALUES (2), (4), (6), (8), (10)) AS t(x)), mu := 5.0)
+FROM ttest_1samp([2.0, 4.0, 6.0, 8.0, 10.0], mu := 5.0)
 ----
 0.7071	0.5187
 

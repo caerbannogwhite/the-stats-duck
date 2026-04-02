@@ -7,8 +7,10 @@
 
 namespace duckdb {
 
-void StatsDuckExtension::Load(DuckDB &db) {
-	// Not used — loading is done via DUCKDB_CPP_EXTENSION_ENTRY below
+void StatsDuckExtension::Load(ExtensionLoader &loader) {
+	RegisterTTest1Samp(loader);
+	RegisterTTest2Samp(loader);
+	RegisterTTestPaired(loader);
 }
 
 std::string StatsDuckExtension::Name() {
