@@ -4,7 +4,7 @@
 #include <numeric>
 #include <stdexcept>
 
-#include <boost/math/distributions/students_t.hpp>
+#include "t_distribution.hpp"
 
 namespace stats_duck {
 
@@ -22,29 +22,27 @@ static double Variance(const std::vector<double> &v, double mean) {
 }
 
 static double ComputePValue(double t_stat, double df, const std::string &alternative) {
-	boost::math::students_t dist(df);
 	if (alternative == "two-sided") {
-		return 2.0 * boost::math::cdf(boost::math::complement(dist, std::abs(t_stat)));
+		return 2.0 * (1.0 - StudentTCDF(std::abs(t_stat), df));
 	} else if (alternative == "less") {
-		return boost::math::cdf(dist, t_stat);
+		return StudentTCDF(t_stat, df);
 	} else { // "greater"
-		return boost::math::cdf(boost::math::complement(dist, t_stat));
+		return 1.0 - StudentTCDF(t_stat, df);
 	}
 }
 
 static void ComputeCI(double mean_diff, double se, double df, double alpha, const std::string &alternative,
                        double &ci_lower, double &ci_upper) {
-	boost::math::students_t dist(df);
 	if (alternative == "two-sided") {
-		double t_crit = boost::math::quantile(boost::math::complement(dist, alpha / 2.0));
+		double t_crit = StudentTQuantile(1.0 - alpha / 2.0, df);
 		ci_lower = mean_diff - t_crit * se;
 		ci_upper = mean_diff + t_crit * se;
 	} else if (alternative == "less") {
-		double t_crit = boost::math::quantile(boost::math::complement(dist, alpha));
+		double t_crit = StudentTQuantile(1.0 - alpha, df);
 		ci_lower = -std::numeric_limits<double>::infinity();
 		ci_upper = mean_diff + t_crit * se;
 	} else { // "greater"
-		double t_crit = boost::math::quantile(boost::math::complement(dist, alpha));
+		double t_crit = StudentTQuantile(1.0 - alpha, df);
 		ci_lower = mean_diff - t_crit * se;
 		ci_upper = std::numeric_limits<double>::infinity();
 	}

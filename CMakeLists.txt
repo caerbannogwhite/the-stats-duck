@@ -13,14 +13,10 @@ set(EXTENSION_SOURCES
     src/ttest_function.cpp
     src/ttest_compute.cpp)
 
-find_package(Boost REQUIRED)
-
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
-target_link_libraries(${EXTENSION_NAME} Boost::boost)
 
 set(PARAMETERS "-warnings")
 build_loadable_extension(${TARGET_NAME} ${PARAMETERS} ${EXTENSION_SOURCES})
-target_link_libraries(${LOADABLE_EXTENSION_NAME} Boost::boost)
 
 install(
   TARGETS ${EXTENSION_NAME}
