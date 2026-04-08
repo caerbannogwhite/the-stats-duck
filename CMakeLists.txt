@@ -12,7 +12,8 @@ set(EXTENSION_SOURCES
     src/stats_duck_extension.cpp
     src/ttest_function.cpp
     src/ttest_compute.cpp
-    src/ttest_agg_function.cpp)
+    src/ttest_agg_function.cpp
+    src/nonparametric_function.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 

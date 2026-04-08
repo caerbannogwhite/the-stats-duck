@@ -1,0 +1,82 @@
+# name: test/sql/mann_whitney.test
+# description: Mann-Whitney U test
+# group: [stats_duck]
+
+require stats_duck
+
+# Two clearly separated groups
+# A = [1, 2, 3, 4, 5], B = [6, 7, 8, 9, 10]
+# All A values < all B values, so U1 = 0
+statement ok
+CREATE TABLE separated AS SELECT * FROM (VALUES
+    (1.0, 6.0), (2.0, 7.0), (3.0, 8.0), (4.0, 9.0), (5.0, 10.0)
+) AS t(a, b);
+
+query TTTT
+SELECT (r).test_type,
+       ROUND((r).u_statistic, 1),
+       (r).alternative,
+       ROUND((r).rank_biserial, 4)
+FROM (SELECT mann_whitney_u(a, b) AS r FROM separated)
+----
+Mann-Whitney U	0.0	two-sided	1.0
+
+# Identical groups: U = n1*n2/2
+statement ok
+CREATE TABLE identical AS SELECT * FROM (VALUES
+    (1.0, 1.0), (2.0, 2.0), (3.0, 3.0), (4.0, 4.0), (5.0, 5.0)
+) AS t(a, b);
+
+query TT
+SELECT ROUND((r).u_statistic, 1),
+       ROUND((r).rank_biserial, 4)
+FROM (SELECT mann_whitney_u(a, b) AS r FROM identical)
+----
+12.5	0.0
+
+# Overlapping groups
+# scipy.stats.mannwhitneyu([1,2,3,4,5], [3,4,5,6,7], alternative='two-sided')
+# U=5.0, p=0.1111 (normal approx may differ slightly)
+statement ok
+CREATE TABLE overlap AS SELECT * FROM (VALUES
+    (1.0, 3.0), (2.0, 4.0), (3.0, 5.0), (4.0, 6.0), (5.0, 7.0)
+) AS t(a, b);
+
+query TT
+SELECT ROUND((r).u_statistic, 1),
+       ROUND((r).rank_biserial, 4)
+FROM (SELECT mann_whitney_u(a, b) AS r FROM overlap)
+----
+4.5	0.64
+
+# One-sided test: A less than B
+query TT
+SELECT (r).alternative,
+       ROUND((r).p_value, 4)
+FROM (SELECT mann_whitney_u(a, b, 'less') AS r FROM separated)
+----
+less	0.0045
+
+# NULLs are skipped per-column
+statement ok
+CREATE TABLE with_nulls AS SELECT * FROM (VALUES
+    (1.0, 6.0), (2.0, NULL), (3.0, 8.0), (NULL, 9.0), (5.0, 10.0)
+) AS t(a, b);
+
+# A has 4 values [1,3,5,...missing 2], B has 4 values [6,8,9,10]
+query T
+SELECT ROUND((mann_whitney_u(a, b)).u_statistic, 1) FROM with_nulls
+----
+0.0
+
+# Too few observations returns NULL
+query T
+SELECT mann_whitney_u(a, b) FROM (VALUES (1.0, 2.0)) AS t(a, b)
+----
+NULL
+
+# Error: invalid alternative
+statement error
+SELECT mann_whitney_u(a, b, 'invalid') FROM overlap
+----
+alternative must be 'two-sided', 'less', or 'greater'

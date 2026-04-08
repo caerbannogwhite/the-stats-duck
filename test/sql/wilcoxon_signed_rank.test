@@ -1,0 +1,77 @@
+# name: test/sql/wilcoxon_signed_rank.test
+# description: Wilcoxon signed-rank test
+# group: [stats_duck]
+
+require stats_duck
+
+# R sleep dataset — all drug1-drug2 differences are negative (except one zero)
+statement ok
+CREATE TABLE sleep AS SELECT * FROM (VALUES
+    (0.7, 1.9), (-1.6, 0.8), (-0.2, 1.1), (-1.2, 0.1), (-0.1, -0.1),
+    (3.4, 4.4), (3.7, 5.5), (0.8, 1.6), (0.0, 4.6), (2.0, 3.4)
+) AS t(drug1, drug2);
+
+# Pair 5 has diff=0 (excluded), remaining 9 diffs are all negative → W+ = 0
+query TTT
+SELECT (r).test_type,
+       ROUND((r).w_statistic, 1),
+       (r).alternative
+FROM (SELECT wilcoxon_signed_rank(drug1, drug2) AS r FROM sleep)
+----
+Wilcoxon Signed-Rank	0.0	two-sided
+
+# Swapping columns: all diffs become positive → W+ = n*(n+1)/2 = 45
+query T
+SELECT ROUND((wilcoxon_signed_rank(drug2, drug1)).w_statistic, 1) FROM sleep
+----
+45.0
+
+# Effect size should be negative (drug1 < drug2)
+query T
+SELECT CASE WHEN (wilcoxon_signed_rank(drug1, drug2)).effect_size_r < 0 THEN 'negative' ELSE 'positive' END FROM sleep
+----
+negative
+
+# Swapping gives positive effect size
+query T
+SELECT CASE WHEN (wilcoxon_signed_rank(drug2, drug1)).effect_size_r > 0 THEN 'positive' ELSE 'negative' END FROM sleep
+----
+positive
+
+# One-sided test
+query T
+SELECT (wilcoxon_signed_rank(drug1, drug2, 'less')).alternative FROM sleep
+----
+less
+
+# All equal positive differences: W+ = n*(n+1)/2
+statement ok
+CREATE TABLE all_pos AS SELECT * FROM (VALUES
+    (5.0, 1.0), (6.0, 2.0), (7.0, 3.0), (8.0, 4.0)
+) AS t(a, b);
+
+query T
+SELECT ROUND((wilcoxon_signed_rank(a, b)).w_statistic, 1) FROM all_pos
+----
+10.0
+
+# NULLs: skip pairs where either is NULL
+statement ok
+INSERT INTO sleep VALUES (NULL, 5.0), (1.0, NULL);
+
+query T
+SELECT ROUND((wilcoxon_signed_rank(drug1, drug2)).w_statistic, 1) FROM sleep
+----
+0.0
+
+# Too few non-zero differences returns NULL
+query T
+SELECT wilcoxon_signed_rank(a, b) FROM (VALUES (1.0, 2.0)) AS t(a, b)
+----
+NULL
+
+# Zero differences are excluded — if all diffs are zero, returns NULL
+query T
+SELECT wilcoxon_signed_rank(a, b) FROM (VALUES (1.0, 1.0), (2.0, 2.0)) AS t(a, b)
+----
+NULL

@@ -9,18 +9,24 @@ A DuckDB extension for statistical hypothesis testing.
 | `ttest_1samp(column, [mu], [alpha], [alternative])`                  | One-sample t-test                        |
 | `ttest_2samp(column1, column2, [equal_var], [alpha], [alternative])` | Two-sample t-test (Welch's or Student's) |
 | `ttest_paired(column1, column2, [alpha], [alternative])`             | Paired t-test                            |
+| `mann_whitney_u(column1, column2, [alternative])`                    | Mann-Whitney U test (Wilcoxon rank-sum)  |
+| `wilcoxon_signed_rank(column1, column2, [alternative])`              | Wilcoxon signed-rank test                |
 
-All functions are **aggregate functions** that return a `STRUCT` with fields:
+All functions are **aggregate functions** that return a `STRUCT`.
 
-`test_type`, `t_statistic`, `df`, `p_value`, `alternative`, `mean_diff`, `ci_lower`, `ci_upper`, `cohens_d`
+**t-test result fields:** `test_type`, `t_statistic`, `df`, `p_value`, `alternative`, `mean_diff`, `ci_lower`, `ci_upper`, `cohens_d`
+
+**Mann-Whitney result fields:** `test_type`, `u_statistic`, `z_statistic`, `p_value`, `alternative`, `rank_biserial`
+
+**Wilcoxon result fields:** `test_type`, `w_statistic`, `z_statistic`, `p_value`, `alternative`, `effect_size_r`
 
 ### Parameters
 
 | Parameter     | Type      | Default       | Description                                                      |
 | ------------- | --------- | ------------- | ---------------------------------------------------------------- |
-| `mu`          | `DOUBLE`  | `0.0`         | Hypothesized population mean (one-sample only)                   |
+| `mu`          | `DOUBLE`  | `0.0`         | Hypothesized population mean (one-sample t-test only)            |
 | `equal_var`   | `BOOLEAN` | `false`       | Assume equal variances — Student's pooled test (two-sample only) |
-| `alpha`       | `DOUBLE`  | `0.05`        | Significance level for confidence intervals                      |
+| `alpha`       | `DOUBLE`  | `0.05`        | Significance level for confidence intervals (t-tests only)       |
 | `alternative` | `VARCHAR` | `'two-sided'` | `'two-sided'`, `'less'`, or `'greater'`                          |
 
 ## Examples
@@ -82,6 +88,27 @@ SELECT id3,
        (ttest_1samp(v3)).p_value
 FROM measurements
 GROUP BY id3;
+```
+
+### Mann-Whitney U test
+
+Non-parametric alternative to the two-sample t-test:
+
+```sql
+-- Compare two independent samples
+SELECT mann_whitney_u(group_a, group_b) FROM experiment;
+
+-- One-sided test
+SELECT mann_whitney_u(group_a, group_b, 'less') FROM experiment;
+```
+
+### Wilcoxon signed-rank test
+
+Non-parametric alternative to the paired t-test:
+
+```sql
+-- Compare paired measurements
+SELECT wilcoxon_signed_rank(before, after) FROM patients;
 ```
 
 ### Inline data
