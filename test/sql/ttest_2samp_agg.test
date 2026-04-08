@@ -1,0 +1,58 @@
+# name: test/sql/ttest_2samp_agg.test
+# description: Two-sample t-test aggregate function
+# group: [stats_duck]
+
+require stats_duck
+
+# Two columns: group A = [1,2,3,4,5], group B = [3,4,5,6,7]
+statement ok
+CREATE TABLE two_groups AS SELECT * FROM (VALUES
+    (1.0, 3.0), (2.0, 4.0), (3.0, 5.0), (4.0, 6.0), (5.0, 7.0)
+) AS t(a, b);
+
+# Basic Welch's t-test — should match table function
+query TTTT
+SELECT (ttest_2samp(a, b)).test_type,
+       ROUND((ttest_2samp(a, b)).t_statistic, 4),
+       ROUND((ttest_2samp(a, b)).df, 1),
+       ROUND((ttest_2samp(a, b)).p_value, 4)
+FROM two_groups
+----
+Welch Two-sample	-2.0	8.0	0.0805
+
+# With equal_var = true
+query TT
+SELECT (ttest_2samp(a, b, true)).test_type,
+       ROUND((ttest_2samp(a, b, true)).df, 1)
+FROM two_groups
+----
+Student Two-sample	8.0
+
+# With equal_var and alpha
+query TT
+SELECT ROUND((ttest_2samp(a, b, false, 0.01)).ci_lower, 4),
+       ROUND((ttest_2samp(a, b, false, 0.01)).ci_upper, 4)
+FROM two_groups
+----
+-5.3554	1.3554
+
+# With alternative
+query T
+SELECT ROUND((ttest_2samp(a, b, false, 0.05, 'less')).p_value, 4)
+FROM two_groups
+----
+0.0402
+
+# NULLs: each column accumulates independently
+statement ok
+CREATE TABLE sparse AS SELECT * FROM (VALUES
+    (1.0, 3.0), (2.0, NULL), (3.0, 5.0), (4.0, 6.0), (5.0, 7.0), (NULL, 4.0)
+) AS t(a, b);
+
+# group A has 5 non-null, group B has 5 non-null
+query TT
+SELECT ROUND((ttest_2samp(a, b)).t_statistic, 4),
+       ROUND((ttest_2samp(a, b)).p_value, 4)
+FROM sparse
+----
+-2.0	0.0805

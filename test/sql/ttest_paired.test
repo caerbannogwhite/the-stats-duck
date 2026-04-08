@@ -5,69 +5,56 @@
 require stats_duck
 
 # R sleep dataset: extra hours of sleep for 10 patients under two drugs
-# Drug 1: 0.7, -1.6, -0.2, -1.2, -0.1, 3.4, 3.7, 0.8, 0.0, 2.0
-# Drug 2: 1.9,  0.8,  1.1,  0.1, -0.1, 4.4, 5.5, 1.6, 4.6, 3.4
+statement ok
+CREATE TABLE sleep AS SELECT * FROM (VALUES
+    (0.7, 1.9), (-1.6, 0.8), (-0.2, 1.1), (-1.2, 0.1), (-0.1, -0.1),
+    (3.4, 4.4), (3.7, 5.5), (0.8, 1.6), (0.0, 4.6), (2.0, 3.4)
+) AS t(drug1, drug2);
+
 # R: t.test(drug1, drug2, paired=TRUE) → t=-4.0621, df=9, p=0.002833
 # CI: [-2.4599, -0.7001]
-query ITTTTTTTT
-SELECT test_type,
-       ROUND(t_statistic, 4) as t_stat,
-       ROUND(df, 1) as df,
-       ROUND(p_value, 6) as p_val,
-       alternative,
-       ROUND(mean_diff, 4) as mean_diff,
-       ROUND(ci_lower, 4) as ci_lower,
-       ROUND(ci_upper, 4) as ci_upper,
-       ROUND(cohens_d, 4) as cohens_d
-FROM ttest_paired(
-    [0.7, -1.6, -0.2, -1.2, -0.1, 3.4, 3.7, 0.8, 0.0, 2.0],
-    [1.9,  0.8,  1.1,  0.1, -0.1, 4.4, 5.5, 1.6, 4.6, 3.4]
-)
+query TTTTTTTTT
+SELECT (r).test_type,
+       ROUND((r).t_statistic, 4) as t_stat,
+       ROUND((r).df, 1) as df,
+       ROUND((r).p_value, 6) as p_val,
+       (r).alternative,
+       ROUND((r).mean_diff, 4) as mean_diff,
+       ROUND((r).ci_lower, 4) as ci_lower,
+       ROUND((r).ci_upper, 4) as ci_upper,
+       ROUND((r).cohens_d, 4) as cohens_d
+FROM (SELECT ttest_paired(drug1, drug2) AS r FROM sleep)
 ----
 Paired	-4.0621	9.0	0.002833	two-sided	-1.58	-2.4599	-0.7001	-1.2846
 
 # Symmetry: swapping samples negates t-statistic and mean_diff
 query TT
-SELECT ROUND(t_statistic, 4) as t_stat,
-       ROUND(mean_diff, 4) as mean_diff
-FROM ttest_paired(
-    [1.9,  0.8,  1.1,  0.1, -0.1, 4.4, 5.5, 1.6, 4.6, 3.4],
-    [0.7, -1.6, -0.2, -1.2, -0.1, 3.4, 3.7, 0.8, 0.0, 2.0]
-)
+SELECT ROUND((r).t_statistic, 4) as t_stat,
+       ROUND((r).mean_diff, 4) as mean_diff
+FROM (SELECT ttest_paired(drug2, drug1) AS r FROM sleep)
 ----
 4.0621	1.58
 
 # One-sided: is drug 1 less effective than drug 2?
 query TT
-SELECT alternative,
-       ROUND(p_value, 6) as p_val
-FROM ttest_paired(
-    [0.7, -1.6, -0.2, -1.2, -0.1, 3.4, 3.7, 0.8, 0.0, 2.0],
-    [1.9,  0.8,  1.1,  0.1, -0.1, 4.4, 5.5, 1.6, 4.6, 3.4],
-    alternative := 'less'
-)
+SELECT (r).alternative,
+       ROUND((r).p_value, 6) as p_val
+FROM (SELECT ttest_paired(drug1, drug2, 0.05, 'less') AS r FROM sleep)
 ----
 less	0.001417
 
 # Custom alpha (99% CI)
 query TT
-SELECT ROUND(ci_lower, 4), ROUND(ci_upper, 4)
-FROM ttest_paired(
-    [0.7, -1.6, -0.2, -1.2, -0.1, 3.4, 3.7, 0.8, 0.0, 2.0],
-    [1.9,  0.8,  1.1,  0.1, -0.1, 4.4, 5.5, 1.6, 4.6, 3.4],
-    alpha := 0.01
-)
+SELECT ROUND((r).ci_lower, 4), ROUND((r).ci_upper, 4)
+FROM (SELECT ttest_paired(drug1, drug2, 0.01) AS r FROM sleep)
 ----
 -2.8441	-0.3159
 
-# Error: unequal lengths
-statement error
-SELECT * FROM ttest_paired([1.0, 2.0, 3.0], [4.0, 5.0])
-----
-Paired t-test requires equal-length samples
+# NULLs in either column skip the entire pair
+statement ok
+INSERT INTO sleep VALUES (NULL, 5.0), (1.0, NULL);
 
-# Error: too few observations
-statement error
-SELECT * FROM ttest_paired([1.0], [2.0])
+query T
+SELECT ROUND((ttest_paired(drug1, drug2)).df, 1) FROM sleep
 ----
-One-sample t-test requires at least 2 observations
+9.0

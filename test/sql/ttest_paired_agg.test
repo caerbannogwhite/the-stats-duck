@@ -1,0 +1,47 @@
+# name: test/sql/ttest_paired_agg.test
+# description: Paired t-test aggregate function
+# group: [stats_duck]
+
+require stats_duck
+
+# R sleep dataset
+statement ok
+CREATE TABLE sleep AS SELECT * FROM (VALUES
+    (1, 0.7, 1.9), (2, -1.6, 0.8), (3, -0.2, 1.1), (4, -1.2, 0.1), (5, -0.1, -0.1),
+    (6, 3.4, 4.4), (7, 3.7, 5.5), (8, 0.8, 1.6), (9, 0.0, 4.6), (10, 2.0, 3.4)
+) AS t(patient, drug1, drug2);
+
+# Basic paired aggregate — should match table function result
+query TTTT
+SELECT ROUND((ttest_paired(drug1, drug2)).t_statistic, 4),
+       ROUND((ttest_paired(drug1, drug2)).df, 1),
+       ROUND((ttest_paired(drug1, drug2)).p_value, 6),
+       ROUND((ttest_paired(drug1, drug2)).mean_diff, 4)
+FROM sleep
+----
+-4.0621	9.0	0.002833	-1.58
+
+# With alpha parameter
+query TT
+SELECT ROUND((ttest_paired(drug1, drug2, 0.01)).ci_lower, 4),
+       ROUND((ttest_paired(drug1, drug2, 0.01)).ci_upper, 4)
+FROM sleep
+----
+-2.8441	-0.3159
+
+# With alternative parameter
+query TT
+SELECT (ttest_paired(drug1, drug2, 0.05, 'less')).alternative,
+       ROUND((ttest_paired(drug1, drug2, 0.05, 'less')).p_value, 6)
+FROM sleep
+----
+less	0.001417
+
+# NULLs in either column skip the pair
+statement ok
+INSERT INTO sleep VALUES (11, NULL, 5.0), (12, 1.0, NULL);
+
+query T
+SELECT ROUND((ttest_paired(drug1, drug2)).df, 1) FROM sleep
+----
+9.0

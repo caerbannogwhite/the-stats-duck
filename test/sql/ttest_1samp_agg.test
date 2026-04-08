@@ -1,0 +1,72 @@
+# name: test/sql/ttest_1samp_agg.test
+# description: One-sample t-test aggregate function
+# group: [stats_duck]
+
+require stats_duck
+
+# Create test table
+statement ok
+CREATE TABLE test_data AS SELECT * FROM (VALUES
+    ('A', 2.0), ('A', 4.0), ('A', 6.0), ('A', 8.0), ('A', 10.0),
+    ('B', 1.0), ('B', 3.0), ('B', 5.0)
+) AS t(grp, val);
+
+# Basic aggregate: same data as table function test [2, 4, 6, 8, 10]
+query TTTTT
+SELECT (ttest_1samp(val)).test_type,
+       ROUND((ttest_1samp(val)).t_statistic, 4),
+       ROUND((ttest_1samp(val)).df, 1),
+       ROUND((ttest_1samp(val)).p_value, 4),
+       (ttest_1samp(val)).alternative
+FROM test_data WHERE grp = 'A'
+----
+One-sample	4.2426	4.0	0.0132	two-sided
+
+# Aggregate with mu parameter
+query TT
+SELECT ROUND((ttest_1samp(val, 6.0)).t_statistic, 4),
+       ROUND((ttest_1samp(val, 6.0)).p_value, 4)
+FROM test_data WHERE grp = 'A'
+----
+0.0	1.0
+
+# Aggregate with mu and alpha
+query TT
+SELECT ROUND((ttest_1samp(val, 0.0, 0.01)).ci_lower, 4),
+       ROUND((ttest_1samp(val, 0.0, 0.01)).ci_upper, 4)
+FROM test_data WHERE grp = 'A'
+----
+-0.5112	12.5112
+
+# Aggregate with alternative = 'greater'
+query TT
+SELECT (ttest_1samp(val, 0.0, 0.05, 'greater')).alternative,
+       ROUND((ttest_1samp(val, 0.0, 0.05, 'greater')).p_value, 4)
+FROM test_data WHERE grp = 'A'
+----
+greater	0.0066
+
+# GROUP BY: per-group t-tests
+query TTT
+SELECT grp,
+       ROUND((ttest_1samp(val)).t_statistic, 4),
+       ROUND((ttest_1samp(val)).p_value, 4)
+FROM test_data GROUP BY grp ORDER BY grp
+----
+A	4.2426	0.0132
+B	2.5981	0.1217
+
+# NULLs should be skipped
+statement ok
+INSERT INTO test_data VALUES ('A', NULL);
+
+query T
+SELECT ROUND((ttest_1samp(val)).df, 1) FROM test_data WHERE grp = 'A'
+----
+4.0
+
+# Too few observations returns NULL
+query T
+SELECT ttest_1samp(val) FROM (SELECT 1.0 AS val)
+----
+NULL
