@@ -4,6 +4,7 @@
 #include "ttest_function.hpp"
 #include "ttest_agg_function.hpp"
 #include "nonparametric_function.hpp"
+#include "read_stat_function.hpp"
 
 #include "duckdb/main/extension/extension_loader.hpp"
 
@@ -15,6 +16,7 @@ void StatsDuckExtension::Load(ExtensionLoader &loader) {
 	RegisterTTestPairedAgg(loader);
 	RegisterMannWhitneyU(loader);
 	RegisterWilcoxonSignedRank(loader);
+	RegisterReadStat(loader);
 }
 
 std::string StatsDuckExtension::Name() {
@@ -31,10 +33,15 @@ std::string StatsDuckExtension::Version() const {
 
 } // namespace duckdb
 
+extern "C" {
+
 DUCKDB_CPP_EXTENSION_ENTRY(stats_duck, loader) {
 	duckdb::RegisterTTest1SampAgg(loader);
 	duckdb::RegisterTTest2SampAgg(loader);
 	duckdb::RegisterTTestPairedAgg(loader);
 	duckdb::RegisterMannWhitneyU(loader);
 	duckdb::RegisterWilcoxonSignedRank(loader);
+	duckdb::RegisterReadStat(loader);
+}
+
 }

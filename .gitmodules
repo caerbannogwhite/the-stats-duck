@@ -4,3 +4,6 @@
 [submodule "extension-ci-tools"]
 	path = extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools.git
+[submodule "third_party/readstat"]
+	path = third_party/readstat
+	url = https://github.com/WizardMac/ReadStat.git
