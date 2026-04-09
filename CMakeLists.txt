@@ -72,16 +72,14 @@ set(EXTENSION_SOURCES
 # ── Platform-specific iconv/zlib handling ────────────────────────────────────
 
 find_package(ZLIB)
-find_package(Iconv)
 
-# On Windows without system iconv, use vendored win_iconv
-if(WIN32 AND NOT Iconv_FOUND)
+# On Windows, always use vendored win_iconv (avoids MinGW libiconv build issues)
+if(WIN32)
     set(WIN_ICONV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/win_iconv)
     include_directories(${WIN_ICONV_DIR})
     list(APPEND EXTENSION_SOURCES ${WIN_ICONV_DIR}/win_iconv.c)
-    set(HAS_ICONV TRUE)
 else()
-    set(HAS_ICONV ${Iconv_FOUND})
+    find_package(Iconv)
 endif()
 
 # Exclude zsav sources when zlib is unavailable
