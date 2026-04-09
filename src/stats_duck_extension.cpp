@@ -6,17 +6,22 @@
 #include "nonparametric_function.hpp"
 #include "read_stat_function.hpp"
 
-#include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/main/extension_util.hpp"
 
 namespace duckdb {
 
-void StatsDuckExtension::Load(ExtensionLoader &loader) {
-	RegisterTTest1SampAgg(loader);
-	RegisterTTest2SampAgg(loader);
-	RegisterTTestPairedAgg(loader);
-	RegisterMannWhitneyU(loader);
-	RegisterWilcoxonSignedRank(loader);
-	RegisterReadStat(loader);
+static void LoadInternal(DuckDB &db) {
+	auto &instance = *db.instance;
+	RegisterTTest1SampAgg(instance);
+	RegisterTTest2SampAgg(instance);
+	RegisterTTestPairedAgg(instance);
+	RegisterMannWhitneyU(instance);
+	RegisterWilcoxonSignedRank(instance);
+	RegisterReadStat(instance);
+}
+
+void StatsDuckExtension::Load(DuckDB &db) {
+	LoadInternal(db);
 }
 
 std::string StatsDuckExtension::Name() {
@@ -35,13 +40,16 @@ std::string StatsDuckExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_CPP_EXTENSION_ENTRY(stats_duck, loader) {
-	duckdb::RegisterTTest1SampAgg(loader);
-	duckdb::RegisterTTest2SampAgg(loader);
-	duckdb::RegisterTTestPairedAgg(loader);
-	duckdb::RegisterMannWhitneyU(loader);
-	duckdb::RegisterWilcoxonSignedRank(loader);
-	duckdb::RegisterReadStat(loader);
+DUCKDB_EXTENSION_API void stats_duck_init(duckdb::DatabaseInstance &db) {
+	duckdb::DuckDB db_wrapper(db);
+	duckdb::LoadInternal(db_wrapper);
 }
 
+DUCKDB_EXTENSION_API const char *stats_duck_version() {
+	return duckdb::DuckDB::LibraryVersion();
 }
+}
+
+#ifndef DUCKDB_EXTENSION_MAIN
+#error DUCKDB_EXTENSION_MAIN not defined
+#endif

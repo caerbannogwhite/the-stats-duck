@@ -4,7 +4,7 @@
 
 namespace duckdb {
 
-void RegisterMannWhitneyU(ExtensionLoader &loader);
-void RegisterWilcoxonSignedRank(ExtensionLoader &loader);
+void RegisterMannWhitneyU(DatabaseInstance &db);
+void RegisterWilcoxonSignedRank(DatabaseInstance &db);
 
 } // namespace duckdb

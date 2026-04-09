@@ -2,7 +2,7 @@
 #include "ttest_compute.hpp"
 
 #include "duckdb/function/table_function.hpp"
-#include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/main/extension_util.hpp"
 #include "duckdb/common/types/value.hpp"
 
 namespace duckdb {
@@ -159,13 +159,13 @@ static unique_ptr<FunctionData> TTest1SampBind(ClientContext &context, TableFunc
 	return std::move(bind_data);
 }
 
-void RegisterTTest1Samp(ExtensionLoader &loader) {
+void RegisterTTest1Samp(DatabaseInstance &db) {
 	TableFunction func("ttest_1samp", {LogicalType::LIST(LogicalType::DOUBLE)}, TTestExecute, TTest1SampBind,
 	                   TTestInitGlobal);
 	func.named_parameters["mu"] = LogicalType::DOUBLE;
 	func.named_parameters["alpha"] = LogicalType::DOUBLE;
 	func.named_parameters["alternative"] = LogicalType::VARCHAR;
-	loader.RegisterFunction(func);
+	ExtensionUtil::RegisterFunction(db, func);
 }
 
 // ─── Two-sample t-test ──────────────────────────────────────────────────────
@@ -188,13 +188,13 @@ static unique_ptr<FunctionData> TTest2SampBind(ClientContext &context, TableFunc
 	return std::move(bind_data);
 }
 
-void RegisterTTest2Samp(ExtensionLoader &loader) {
+void RegisterTTest2Samp(DatabaseInstance &db) {
 	TableFunction func("ttest_2samp", {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)},
 	                   TTestExecute, TTest2SampBind, TTestInitGlobal);
 	func.named_parameters["equal_var"] = LogicalType::BOOLEAN;
 	func.named_parameters["alpha"] = LogicalType::DOUBLE;
 	func.named_parameters["alternative"] = LogicalType::VARCHAR;
-	loader.RegisterFunction(func);
+	ExtensionUtil::RegisterFunction(db, func);
 }
 
 // ─── Paired t-test ──────────────────────────────────────────────────────────
@@ -216,13 +216,13 @@ static unique_ptr<FunctionData> TTestPairedBind(ClientContext &context, TableFun
 	return std::move(bind_data);
 }
 
-void RegisterTTestPaired(ExtensionLoader &loader) {
+void RegisterTTestPaired(DatabaseInstance &db) {
 	TableFunction func("ttest_paired",
 	                   {LogicalType::LIST(LogicalType::DOUBLE), LogicalType::LIST(LogicalType::DOUBLE)}, TTestExecute,
 	                   TTestPairedBind, TTestInitGlobal);
 	func.named_parameters["alpha"] = LogicalType::DOUBLE;
 	func.named_parameters["alternative"] = LogicalType::VARCHAR;
-	loader.RegisterFunction(func);
+	ExtensionUtil::RegisterFunction(db, func);
 }
 
 } // namespace duckdb
