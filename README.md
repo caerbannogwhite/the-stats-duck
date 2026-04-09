@@ -11,6 +11,7 @@ A DuckDB extension for statistical hypothesis testing.
 | `ttest_paired(column1, column2, [alpha], [alternative])`             | Paired t-test                            |
 | `mann_whitney_u(column1, column2, [alternative])`                    | Mann-Whitney U test (Wilcoxon rank-sum)  |
 | `wilcoxon_signed_rank(column1, column2, [alternative])`              | Wilcoxon signed-rank test                |
+| `read_stat(path, [format], [encoding])`                              | Read SAS/SPSS/Stata files                |
 
 All functions are **aggregate functions** that return a `STRUCT`.
 
@@ -110,6 +111,23 @@ Non-parametric alternative to the paired t-test:
 -- Compare paired measurements
 SELECT wilcoxon_signed_rank(before, after) FROM patients;
 ```
+
+### Reading statistical file formats
+
+Read SAS (`.sas7bdat`, `.xpt`), SPSS (`.sav`, `.zsav`, `.por`), and Stata (`.dta`) files:
+
+```sql
+-- Auto-detect format from file extension
+SELECT * FROM read_stat('data.sas7bdat');
+
+-- Explicit format
+SELECT * FROM read_stat('data.dat', format := 'dta');
+
+-- Replacement scan: query files directly
+SELECT * FROM 'survey.sav';
+```
+
+Date, datetime, and time columns are automatically detected from format metadata and converted to DuckDB's native temporal types.
 
 ### Inline data
 
