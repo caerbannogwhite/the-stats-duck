@@ -3,8 +3,10 @@
 
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "duckdb/common/file_system.hpp"
 #include "duckdb/main/extension_util.hpp"
 #include "duckdb/main/config.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/parser/expression/constant_expression.hpp"
 #include "duckdb/parser/expression/function_expression.hpp"
@@ -48,6 +50,85 @@ static readstat_error_t ParseWithFormat(readstat_parser_t *parser, const string 
 		return readstat_parse_dta(parser, path.c_str(), ctx);
 	}
 	return READSTAT_ERROR_PARSE;
+}
+
+// ─── DuckDB FileSystem I/O handlers ─────────────────────────────────────────────
+// Route ReadStat's file reads through DuckDB's VFS so that remote files
+// (httpfs/s3), registered WASM file buffers, and other virtual file systems
+// work transparently. The default unistd handlers call raw POSIX open()/read(),
+// which bypass DuckDB's VFS and fail in WASM.
+
+struct DuckDBIOContext {
+	FileSystem *fs;
+	unique_ptr<FileHandle> handle;
+	idx_t file_size;
+};
+
+static int DuckDBOpenHandler(const char *path, void *io_ctx_p) {
+	auto &io_ctx = *static_cast<DuckDBIOContext *>(io_ctx_p);
+	try {
+		io_ctx.handle = io_ctx.fs->OpenFile(path, FileFlags::FILE_FLAGS_READ);
+		io_ctx.file_size = static_cast<idx_t>(io_ctx.handle->GetFileSize());
+		return 0; // fake non-negative fd; ReadStat only checks for < 0
+	} catch (...) {
+		return -1;
+	}
+}
+
+static int DuckDBCloseHandler(void *io_ctx_p) {
+	auto &io_ctx = *static_cast<DuckDBIOContext *>(io_ctx_p);
+	io_ctx.handle.reset();
+	return 0;
+}
+
+static readstat_off_t DuckDBSeekHandler(readstat_off_t offset, readstat_io_flags_t whence, void *io_ctx_p) {
+	auto &io_ctx = *static_cast<DuckDBIOContext *>(io_ctx_p);
+	if (!io_ctx.handle) {
+		return -1;
+	}
+	int64_t new_pos;
+	switch (whence) {
+	case READSTAT_SEEK_SET:
+		new_pos = offset;
+		break;
+	case READSTAT_SEEK_CUR:
+		new_pos = static_cast<int64_t>(io_ctx.handle->SeekPosition()) + offset;
+		break;
+	case READSTAT_SEEK_END:
+		new_pos = static_cast<int64_t>(io_ctx.file_size) + offset;
+		break;
+	default:
+		return -1;
+	}
+	if (new_pos < 0) {
+		return -1;
+	}
+	try {
+		io_ctx.handle->Seek(static_cast<idx_t>(new_pos));
+	} catch (...) {
+		return -1;
+	}
+	return static_cast<readstat_off_t>(new_pos);
+}
+
+static ssize_t DuckDBReadHandler(void *buf, size_t nbyte, void *io_ctx_p) {
+	auto &io_ctx = *static_cast<DuckDBIOContext *>(io_ctx_p);
+	if (!io_ctx.handle) {
+		return -1;
+	}
+	try {
+		return static_cast<ssize_t>(io_ctx.handle->Read(buf, nbyte));
+	} catch (...) {
+		return -1;
+	}
+}
+
+static void InstallDuckDBIO(readstat_parser_t *parser, DuckDBIOContext &io_ctx) {
+	readstat_set_open_handler(parser, DuckDBOpenHandler);
+	readstat_set_close_handler(parser, DuckDBCloseHandler);
+	readstat_set_seek_handler(parser, DuckDBSeekHandler);
+	readstat_set_read_handler(parser, DuckDBReadHandler);
+	readstat_set_io_ctx(parser, &io_ctx);
 }
 
 // ─── Bind data ──────────────────────────────────────────────────────────────────
@@ -137,11 +218,16 @@ static unique_ptr<FunctionData> ReadStatBind(ClientContext &context, TableFuncti
 	readstat_set_error_handler(parser, BindErrorHandler);
 	readstat_set_row_limit(parser, 0);
 
+	DuckDBIOContext io_ctx;
+	io_ctx.fs = &FileSystem::GetFileSystem(context);
+	InstallDuckDBIO(parser, io_ctx);
+
 	if (!bind_data->encoding.empty()) {
 		readstat_set_file_character_encoding(parser, bind_data->encoding.c_str());
 	}
 
 	auto error = ParseWithFormat(parser, bind_data->path, bind_data->format, bind_data.get());
+	readstat_set_io_ctx(parser, nullptr); // detach stack ctx before free
 	readstat_parser_free(parser);
 
 	if (error != READSTAT_OK) {
@@ -234,11 +320,16 @@ static void ReadStatExecute(ClientContext &context, TableFunctionInput &input, D
 	readstat_set_row_offset(parser, static_cast<long>(state.offset));
 	readstat_set_row_limit(parser, static_cast<long>(STANDARD_VECTOR_SIZE));
 
+	DuckDBIOContext io_ctx;
+	io_ctx.fs = &FileSystem::GetFileSystem(context);
+	InstallDuckDBIO(parser, io_ctx);
+
 	if (!bind_data.encoding.empty()) {
 		readstat_set_file_character_encoding(parser, bind_data.encoding.c_str());
 	}
 
 	auto error = ParseWithFormat(parser, bind_data.path, bind_data.format, &exec);
+	readstat_set_io_ctx(parser, nullptr); // detach stack ctx before free
 	readstat_parser_free(parser);
 
 	if (error != READSTAT_OK && exec.rows_read == 0) {
