@@ -6,6 +6,7 @@
 #include "duckdb/common/types/vector.hpp"
 
 #include <cmath>
+#include <string>
 #include <unordered_set>
 
 namespace duckdb {
@@ -209,6 +210,67 @@ static void WriteTimeValue(double raw, const string &format, Vector &vec, idx_t 
 	FlatVector::GetData<int64_t>(vec)[row] = static_cast<int64_t>(secs * 1000000.0);
 }
 
+// ─── UTF-8 sanitization ────────────────────────────────────────────────────────
+// ReadStat is supposed to convert strings to UTF-8 via iconv, but this fails
+// silently for some formats/encodings (e.g., XPT files with Windows-1252
+// characters). DuckDB's string heap asserts valid UTF-8, so we must ensure
+// every string we hand over is clean. Invalid bytes are replaced with U+FFFD.
+
+static std::string SanitizeUtf8(const char *data, size_t len) {
+	std::string result;
+	result.reserve(len);
+	size_t i = 0;
+	while (i < len) {
+		auto byte = static_cast<unsigned char>(data[i]);
+		if (byte < 0x80) {
+			// ASCII — always valid.
+			result.push_back(static_cast<char>(byte));
+			i++;
+		} else if ((byte & 0xE0) == 0xC0) {
+			// 2-byte sequence: 110xxxxx 10xxxxxx
+			if (i + 1 < len && (static_cast<unsigned char>(data[i + 1]) & 0xC0) == 0x80) {
+				result.push_back(data[i]);
+				result.push_back(data[i + 1]);
+				i += 2;
+			} else {
+				result.append("\xEF\xBF\xBD"); // U+FFFD
+				i++;
+			}
+		} else if ((byte & 0xF0) == 0xE0) {
+			// 3-byte sequence: 1110xxxx 10xxxxxx 10xxxxxx
+			if (i + 2 < len && (static_cast<unsigned char>(data[i + 1]) & 0xC0) == 0x80 &&
+			    (static_cast<unsigned char>(data[i + 2]) & 0xC0) == 0x80) {
+				result.push_back(data[i]);
+				result.push_back(data[i + 1]);
+				result.push_back(data[i + 2]);
+				i += 3;
+			} else {
+				result.append("\xEF\xBF\xBD");
+				i++;
+			}
+		} else if ((byte & 0xF8) == 0xF0) {
+			// 4-byte sequence: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+			if (i + 3 < len && (static_cast<unsigned char>(data[i + 1]) & 0xC0) == 0x80 &&
+			    (static_cast<unsigned char>(data[i + 2]) & 0xC0) == 0x80 &&
+			    (static_cast<unsigned char>(data[i + 3]) & 0xC0) == 0x80) {
+				result.push_back(data[i]);
+				result.push_back(data[i + 1]);
+				result.push_back(data[i + 2]);
+				result.push_back(data[i + 3]);
+				i += 4;
+			} else {
+				result.append("\xEF\xBF\xBD");
+				i++;
+			}
+		} else {
+			// Invalid leading byte (0x80-0xBF, 0xF8-0xFF, lone continuation byte).
+			result.append("\xEF\xBF\xBD");
+			i++;
+		}
+	}
+	return result;
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────────
 
 void WriteReadStatValue(readstat_value_t value, readstat_variable_t *variable, const LogicalType &target_type,
@@ -219,7 +281,9 @@ void WriteReadStatValue(readstat_value_t value, readstat_variable_t *variable, c
 	case LogicalTypeId::VARCHAR: {
 		const char *str = readstat_string_value(value);
 		if (str) {
-			FlatVector::GetData<string_t>(vec)[row] = StringVector::AddString(vec, str);
+			size_t len = strlen(str);
+			auto clean = SanitizeUtf8(str, len);
+			FlatVector::GetData<string_t>(vec)[row] = StringVector::AddString(vec, clean);
 		} else {
 			FlatVector::SetNull(vec, row, true);
 		}

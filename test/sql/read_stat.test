@@ -7,7 +7,7 @@ require stats_duck
 # SAS7BDAT format
 query TTTTTTT
 SELECT mychar, ROUND(mynum, 1), mydate, dtime, ROUND(mylabl, 1), ROUND(myord, 1), mytime
-FROM read_stat('./test/sql/sample.sas7bdat')
+FROM read_stat('./test/data/sample.sas7bdat')
 ----
 a	1.1	2018-05-06	2018-05-06 10:10:10	1.0	1.0	10:10:10
 b	1.2	1880-05-06	1880-05-06 10:10:10	2.0	2.0	23:10:10
@@ -18,7 +18,7 @@ e	1000.3	NULL	NULL	1.0	1.0	NULL
 # SAS transport (XPT) format
 query TTTTTTT
 SELECT mychar, ROUND(mynum, 1), mydate, dtime, ROUND(mylabl, 1), ROUND(myord, 1), mytime
-FROM read_stat('./test/sql/sample.xpt')
+FROM read_stat('./test/data/sample.xpt')
 ----
 a	1.1	2018-05-06	2018-05-06 10:10:10	1.0	1.0	10:10:10
 b	1.2	1880-05-06	1880-05-06 10:10:10	2.0	2.0	23:10:10
@@ -29,7 +29,7 @@ e	1000.3	NULL	NULL	1.0	1.0	NULL
 # SPSS SAV format
 query TTTTTTT
 SELECT mychar, ROUND(mynum, 1), mydate, dtime, ROUND(mylabl, 1), ROUND(myord, 1), mytime
-FROM read_stat('./test/sql/sample.sav')
+FROM read_stat('./test/data/sample.sav')
 ----
 a	1.1	2018-05-06	2018-05-06 10:10:10	1.0	1.0	10:10:10
 b	1.2	1880-05-06	1880-05-06 10:10:10	2.0	2.0	23:10:10
@@ -40,7 +40,7 @@ e	1000.3	NULL	NULL	1.0	1.0	NULL
 # SPSS POR format
 query TTTTTTT
 SELECT mychar, ROUND(mynum, 1), mydate, dtime, ROUND(mylabl, 1), ROUND(myord, 1), mytime
-FROM read_stat('./test/sql/sample.por')
+FROM read_stat('./test/data/sample.por')
 ----
 a	1.1	2018-05-06	2018-05-06 10:10:10	1.0	1.0	10:10:10
 b	1.2	1880-05-06	1880-05-06 10:10:10	2.0	2.0	23:10:10
@@ -51,7 +51,7 @@ e	1000.3	NULL	NULL	1.0	1.0	NULL
 # Stata DTA format
 query TTTTTTT
 SELECT mychar, ROUND(mynum, 1), mydate, dtime, ROUND(mylabl, 1), ROUND(myord, 1), mytime
-FROM read_stat('./test/sql/sample.dta')
+FROM read_stat('./test/data/sample.dta')
 ----
 a	1.1	2018-05-06	2018-05-06 10:10:10	1.0	1.0	10:10:10
 b	1.2	1880-05-06	1880-05-06 10:10:10	2.0	2.0	23:10:10
@@ -61,25 +61,42 @@ e	1000.3	NULL	NULL	1.0	1.0	NULL
 
 # Explicit format parameter
 query T
-SELECT mychar FROM read_stat('./test/sql/sample.sav', format := 'sav') LIMIT 1
+SELECT mychar FROM read_stat('./test/data/sample.sav', format := 'sav') LIMIT 1
 ----
 a
 
 # Replacement scan
 query T
-SELECT mychar FROM './test/sql/sample.sas7bdat' LIMIT 1
+SELECT mychar FROM './test/data/sample.sas7bdat' LIMIT 1
 ----
 a
 
 # Missing values (SPSS)
 query T
-SELECT COUNT(*) FROM read_stat('./test/sql/sample_missing.sav')
+SELECT COUNT(*) FROM read_stat('./test/data/sample_missing.sav')
 ----
 7
 
 # Rows 6-7 have NULL numeric values
 query T
-SELECT mychar FROM read_stat('./test/sql/sample_missing.sav') WHERE mynum IS NULL
+SELECT mychar FROM read_stat('./test/data/sample_missing.sav') WHERE mynum IS NULL
 ----
 Z
 (empty)
+
+# CDISC trial summary XPT (real-world file with 6 columns, ~32 rows)
+query I
+SELECT COUNT(*) FROM read_stat('./test/data/ts.xpt')
+----
+32
+
+query TT
+SELECT STUDYID, TSPARMCD FROM read_stat('./test/data/ts.xpt') LIMIT 3
+----
+CDISCPILOT01	ADDON
+CDISCPILOT01	AGEMAX
+CDISCPILOT01	AGEMIN
+
+# Invalid file (HTML 404 error page saved with .xpt extension) — must error, not crash
+statement error
+SELECT * FROM read_stat('./test/data/lab1_0_1refrangesampledata.xpt')

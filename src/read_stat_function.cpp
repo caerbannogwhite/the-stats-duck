@@ -137,7 +137,8 @@ struct ReadStatBindData : public FunctionData {
 	string path;
 	string format;
 	string encoding;
-	idx_t row_count = 0;
+	// -1 when the format doesn't report a row count (e.g., XPT).
+	int64_t row_count = 0;
 	vector<string> column_names;
 	vector<LogicalType> column_types;
 	vector<string> column_formats;
@@ -165,7 +166,10 @@ struct ReadStatBindData : public FunctionData {
 
 static int BindMetadataHandler(readstat_metadata_t *metadata, void *ctx) {
 	auto &bind_data = *static_cast<ReadStatBindData *>(ctx);
-	bind_data.row_count = static_cast<idx_t>(readstat_get_row_count(metadata));
+	// Some formats (notably XPT) report -1 for unknown row count.
+	// We preserve the -1 so Execute can detect this and rely on
+	// ReadStat's own EOF signal instead of a pre-known bound.
+	bind_data.row_count = static_cast<int64_t>(readstat_get_row_count(metadata));
 	return READSTAT_HANDLER_OK;
 }
 
@@ -248,6 +252,7 @@ static unique_ptr<FunctionData> ReadStatBind(ClientContext &context, TableFuncti
 
 struct ReadStatGlobalState : public GlobalTableFunctionState {
 	idx_t offset = 0;
+	bool done = false; // true once ReadStat produces 0 rows (EOF)
 };
 
 static unique_ptr<GlobalTableFunctionState> ReadStatInitGlobal(ClientContext &context,
@@ -303,8 +308,18 @@ static void ReadStatExecute(ClientContext &context, TableFunctionInput &input, D
 	auto &bind_data = input.bind_data->Cast<ReadStatBindData>();
 	auto &state = input.global_state->Cast<ReadStatGlobalState>();
 
-	if (state.offset >= bind_data.row_count) {
+	// If the format reported a known row count, check the bound.
+	// If row_count is -1 (unknown, e.g. XPT), we rely on ReadStat
+	// returning 0 rows to signal EOF (handled below via SetCardinality(0)).
+	if (bind_data.row_count >= 0 && state.offset >= static_cast<idx_t>(bind_data.row_count)) {
 		return; // Done — empty output signals EOF
+	}
+
+	// Guard against re-reading after ReadStat already signaled EOF in a
+	// previous call (rows_read was 0). Without this, unknown-row-count
+	// formats would loop forever.
+	if (state.done) {
+		return;
 	}
 
 	ReadStatExecContext exec;
@@ -339,6 +354,11 @@ static void ReadStatExecute(ClientContext &context, TableFunctionInput &input, D
 
 	output.SetCardinality(exec.rows_read);
 	state.offset += exec.rows_read;
+
+	// If ReadStat produced no rows in this call, the file is exhausted.
+	if (exec.rows_read == 0) {
+		state.done = true;
+	}
 }
 
 // ─── Replacement scan ───────────────────────────────────────────────────────────
