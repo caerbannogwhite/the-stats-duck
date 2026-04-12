@@ -65,6 +65,12 @@ set(EXTENSION_SOURCES
     src/ttest_compute.cpp
     src/ttest_agg_function.cpp
     src/nonparametric_function.cpp
+    src/distribution_functions.cpp
+    src/summary_stats_function.cpp
+    src/correlation_function.cpp
+    src/normality_function.cpp
+    src/anova_function.cpp
+    src/chisq_function.cpp
     src/read_stat_function.cpp
     src/read_stat_types.cpp
     ${READSTAT_SOURCES})
