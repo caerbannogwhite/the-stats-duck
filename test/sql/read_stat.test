@@ -98,5 +98,7 @@ CDISCPILOT01	AGEMAX
 CDISCPILOT01	AGEMIN
 
 # Invalid file (HTML 404 error page saved with .xpt extension) — must error, not crash
-statement error Failed to read
+statement error
 SELECT * FROM read_stat('./test/data/lab1_0_1refrangesampledata.xpt')
+----
+Failed to read
