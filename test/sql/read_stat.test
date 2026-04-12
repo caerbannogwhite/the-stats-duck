@@ -84,11 +84,11 @@ SELECT mychar FROM read_stat('./test/data/sample_missing.sav') WHERE mynum IS NU
 Z
 (empty)
 
-# CDISC trial summary XPT (real-world file with 6 columns, ~32 rows)
+# CDISC trial summary XPT (real-world file with 6 columns, 33 rows)
 query I
 SELECT COUNT(*) FROM read_stat('./test/data/ts.xpt')
 ----
-32
+33
 
 query TT
 SELECT STUDYID, TSPARMCD FROM read_stat('./test/data/ts.xpt') LIMIT 3
