@@ -8,6 +8,6 @@ namespace duckdb {
 //! correlation with significance test (t-distribution) and Fisher-z confidence
 //! interval. Returns STRUCT(test_type, r, t_statistic, df, p_value, alternative,
 //! ci_lower, ci_upper, n).
-void RegisterPearsonTest(DatabaseInstance &db);
+void RegisterPearsonTest(ExtensionLoader &loader);
 
 } // namespace duckdb

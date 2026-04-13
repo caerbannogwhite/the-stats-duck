@@ -3,7 +3,7 @@
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/function/function_set.hpp"
 #include "duckdb/common/types/vector.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/planner/expression.hpp"
 
@@ -265,12 +265,12 @@ static AggregateFunction MakeMannWhitneyAgg(vector<LogicalType> args, bind_aggre
 	                         nullptr, bind_fn, MannWhitneyDestroy);
 }
 
-void RegisterMannWhitneyU(DatabaseInstance &db) {
+void RegisterMannWhitneyU(ExtensionLoader &loader) {
 	AggregateFunctionSet set("mann_whitney_u");
 	set.AddFunction(MakeMannWhitneyAgg({LogicalType::DOUBLE, LogicalType::DOUBLE}, NonParamBindDefault));
 	set.AddFunction(
 	    MakeMannWhitneyAgg({LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::VARCHAR}, NonParamBindAlt));
-	ExtensionUtil::RegisterFunction(db, set);
+	loader.RegisterFunction(set);
 }
 
 // =============================================================================
@@ -410,12 +410,12 @@ static AggregateFunction MakeWilcoxonAgg(vector<LogicalType> args, bind_aggregat
 	                         nullptr, bind_fn, WilcoxonDestroy);
 }
 
-void RegisterWilcoxonSignedRank(DatabaseInstance &db) {
+void RegisterWilcoxonSignedRank(ExtensionLoader &loader) {
 	AggregateFunctionSet set("wilcoxon_signed_rank");
 	set.AddFunction(MakeWilcoxonAgg({LogicalType::DOUBLE, LogicalType::DOUBLE}, NonParamBindDefault));
 	set.AddFunction(
 	    MakeWilcoxonAgg({LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::VARCHAR}, NonParamBindAlt));
-	ExtensionUtil::RegisterFunction(db, set);
+	loader.RegisterFunction(set);
 }
 
 } // namespace duckdb

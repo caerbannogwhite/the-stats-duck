@@ -4,7 +4,7 @@
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/function/function_set.hpp"
 #include "duckdb/common/types/vector.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/planner/expression.hpp"
 
@@ -306,7 +306,7 @@ static AggregateFunction MakeTTest1SampAgg(vector<LogicalType> args, bind_aggreg
 	                         FunctionNullHandling::DEFAULT_NULL_HANDLING, nullptr, bind_fn);
 }
 
-void RegisterTTest1SampAgg(DatabaseInstance &db) {
+void RegisterTTest1SampAgg(ExtensionLoader &loader) {
 	AggregateFunctionSet set("ttest_1samp");
 	set.AddFunction(MakeTTest1SampAgg({LogicalType::DOUBLE}, TTest1SampBind1));
 	set.AddFunction(MakeTTest1SampAgg({LogicalType::DOUBLE, LogicalType::DOUBLE}, TTest1SampBind2));
@@ -314,7 +314,7 @@ void RegisterTTest1SampAgg(DatabaseInstance &db) {
 	    MakeTTest1SampAgg({LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE}, TTest1SampBind3));
 	set.AddFunction(MakeTTest1SampAgg(
 	    {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::VARCHAR}, TTest1SampBind4));
-	ExtensionUtil::RegisterFunction(db, set);
+	loader.RegisterFunction(set);
 }
 
 // =============================================================================
@@ -414,14 +414,14 @@ static AggregateFunction MakeTTestPairedAgg(vector<LogicalType> args, bind_aggre
 	                         nullptr, bind_fn);
 }
 
-void RegisterTTestPairedAgg(DatabaseInstance &db) {
+void RegisterTTestPairedAgg(ExtensionLoader &loader) {
 	AggregateFunctionSet set("ttest_paired");
 	set.AddFunction(MakeTTestPairedAgg({LogicalType::DOUBLE, LogicalType::DOUBLE}, TTestPairedBind2));
 	set.AddFunction(
 	    MakeTTestPairedAgg({LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE}, TTestPairedBind3));
 	set.AddFunction(MakeTTestPairedAgg(
 	    {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::VARCHAR}, TTestPairedBind4));
-	ExtensionUtil::RegisterFunction(db, set);
+	loader.RegisterFunction(set);
 }
 
 // =============================================================================
@@ -576,7 +576,7 @@ static AggregateFunction MakeTTest2SampAgg(vector<LogicalType> args, bind_aggreg
 	                         nullptr, bind_fn);
 }
 
-void RegisterTTest2SampAgg(DatabaseInstance &db) {
+void RegisterTTest2SampAgg(ExtensionLoader &loader) {
 	AggregateFunctionSet set("ttest_2samp");
 	set.AddFunction(MakeTTest2SampAgg({LogicalType::DOUBLE, LogicalType::DOUBLE}, TTest2SampBind2));
 	set.AddFunction(
@@ -587,7 +587,7 @@ void RegisterTTest2SampAgg(DatabaseInstance &db) {
 	set.AddFunction(MakeTTest2SampAgg({LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::BOOLEAN,
 	                                   LogicalType::DOUBLE, LogicalType::VARCHAR},
 	                                  TTest2SampBind5));
-	ExtensionUtil::RegisterFunction(db, set);
+	loader.RegisterFunction(set);
 }
 
 } // namespace duckdb

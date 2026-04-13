@@ -7,7 +7,7 @@
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/planner/expression.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 
 #include <cmath>
 #include <limits>
@@ -296,13 +296,13 @@ static AggregateFunction MakePearson(vector<LogicalType> args, bind_aggregate_fu
 
 } // namespace
 
-void RegisterPearsonTest(DatabaseInstance &db) {
+void RegisterPearsonTest(ExtensionLoader &loader) {
 	AggregateFunctionSet set("pearson_test");
 	set.AddFunction(MakePearson({LogicalType::DOUBLE, LogicalType::DOUBLE}, PearsonBind2));
 	set.AddFunction(MakePearson({LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE}, PearsonBind3));
 	set.AddFunction(MakePearson(
 	    {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::VARCHAR}, PearsonBind4));
-	ExtensionUtil::RegisterFunction(db, set);
+	loader.RegisterFunction(set);
 }
 
 } // namespace duckdb

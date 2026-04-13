@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The extension installs and loads in DuckDB under the technical name `stats_duck` —
 that name is preserved across releases for backward compatibility.
 
+## [Unreleased]
+
+### Changed
+
+- Target DuckDB v1.5.1 (up from v1.2.2). Extensions built for 0.1.x are
+  not ABI-compatible and must be reinstalled.
+- Switched from the `ExtensionUtil::RegisterFunction(db, ...)` API to the
+  newer `ExtensionLoader::RegisterFunction(...)` pattern required by
+  DuckDB v1.5.x.
+- Re-enabled `linux_amd64_musl` CI job (the upstream Alpine Dockerfile bug
+  that affected v1.2.2 is fixed in v1.5.1's extension-ci-tools).
+
 ## [0.1.0-mortician] - 2026-04-13
 
 First public release.

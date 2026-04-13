@@ -5,7 +5,7 @@
 #include "duckdb/common/vector_operations/binary_executor.hpp"
 #include "duckdb/common/vector_operations/ternary_executor.hpp"
 #include "duckdb/function/scalar_function.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 
 namespace duckdb {
 
@@ -190,7 +190,7 @@ static void QFExec(DataChunk &args, ExpressionState &, Vector &result) {
 
 } // namespace
 
-void RegisterDistributionFunctions(DatabaseInstance &db) {
+void RegisterDistributionFunctions(ExtensionLoader &loader) {
 	const auto DBL = LogicalType::DOUBLE;
 
 	// ── Normal ──────────────────────────────────────────────────────────────
@@ -199,37 +199,37 @@ void RegisterDistributionFunctions(DatabaseInstance &db) {
 		dnorm.AddFunction(ScalarFunction({DBL}, DBL, DNormStdExec));
 		dnorm.AddFunction(ScalarFunction({DBL, DBL}, DBL, DNorm2Exec));
 		dnorm.AddFunction(ScalarFunction({DBL, DBL, DBL}, DBL, DNorm3Exec));
-		ExtensionUtil::RegisterFunction(db, dnorm);
+		loader.RegisterFunction(dnorm);
 	}
 	{
 		ScalarFunctionSet pnorm("pnorm");
 		pnorm.AddFunction(ScalarFunction({DBL}, DBL, PNormStdExec));
 		pnorm.AddFunction(ScalarFunction({DBL, DBL}, DBL, PNorm2Exec));
 		pnorm.AddFunction(ScalarFunction({DBL, DBL, DBL}, DBL, PNorm3Exec));
-		ExtensionUtil::RegisterFunction(db, pnorm);
+		loader.RegisterFunction(pnorm);
 	}
 	{
 		ScalarFunctionSet qnorm("qnorm");
 		qnorm.AddFunction(ScalarFunction({DBL}, DBL, QNormStdExec));
 		qnorm.AddFunction(ScalarFunction({DBL, DBL}, DBL, QNorm2Exec));
 		qnorm.AddFunction(ScalarFunction({DBL, DBL, DBL}, DBL, QNorm3Exec));
-		ExtensionUtil::RegisterFunction(db, qnorm);
+		loader.RegisterFunction(qnorm);
 	}
 
 	// ── Student's t ─────────────────────────────────────────────────────────
-	ExtensionUtil::RegisterFunction(db, ScalarFunction("dt", {DBL, DBL}, DBL, DTExec));
-	ExtensionUtil::RegisterFunction(db, ScalarFunction("pt", {DBL, DBL}, DBL, PTExec));
-	ExtensionUtil::RegisterFunction(db, ScalarFunction("qt", {DBL, DBL}, DBL, QTExec));
+	loader.RegisterFunction(ScalarFunction("dt", {DBL, DBL}, DBL, DTExec));
+	loader.RegisterFunction(ScalarFunction("pt", {DBL, DBL}, DBL, PTExec));
+	loader.RegisterFunction(ScalarFunction("qt", {DBL, DBL}, DBL, QTExec));
 
 	// ── Chi-square ──────────────────────────────────────────────────────────
-	ExtensionUtil::RegisterFunction(db, ScalarFunction("dchisq", {DBL, DBL}, DBL, DChiSqExec));
-	ExtensionUtil::RegisterFunction(db, ScalarFunction("pchisq", {DBL, DBL}, DBL, PChiSqExec));
-	ExtensionUtil::RegisterFunction(db, ScalarFunction("qchisq", {DBL, DBL}, DBL, QChiSqExec));
+	loader.RegisterFunction(ScalarFunction("dchisq", {DBL, DBL}, DBL, DChiSqExec));
+	loader.RegisterFunction(ScalarFunction("pchisq", {DBL, DBL}, DBL, PChiSqExec));
+	loader.RegisterFunction(ScalarFunction("qchisq", {DBL, DBL}, DBL, QChiSqExec));
 
 	// ── F ───────────────────────────────────────────────────────────────────
-	ExtensionUtil::RegisterFunction(db, ScalarFunction("df", {DBL, DBL, DBL}, DBL, DFExec));
-	ExtensionUtil::RegisterFunction(db, ScalarFunction("pf", {DBL, DBL, DBL}, DBL, PFExec));
-	ExtensionUtil::RegisterFunction(db, ScalarFunction("qf", {DBL, DBL, DBL}, DBL, QFExec));
+	loader.RegisterFunction(ScalarFunction("df", {DBL, DBL, DBL}, DBL, DFExec));
+	loader.RegisterFunction(ScalarFunction("pf", {DBL, DBL, DBL}, DBL, PFExec));
+	loader.RegisterFunction(ScalarFunction("qf", {DBL, DBL, DBL}, DBL, QFExec));
 }
 
 } // namespace duckdb

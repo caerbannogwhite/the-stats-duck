@@ -4,7 +4,7 @@
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/common/file_system.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/main/config.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -380,12 +380,13 @@ static unique_ptr<TableRef> ReadStatReplacementScan(ClientContext &context, Repl
 
 // ─── Registration ───────────────────────────────────────────────────────────────
 
-void RegisterReadStat(DatabaseInstance &db) {
+void RegisterReadStat(ExtensionLoader &loader) {
 	TableFunction func("read_stat", {LogicalType::VARCHAR}, ReadStatExecute, ReadStatBind, ReadStatInitGlobal);
 	func.named_parameters["format"] = LogicalType::VARCHAR;
 	func.named_parameters["encoding"] = LogicalType::VARCHAR;
-	ExtensionUtil::RegisterFunction(db, func);
+	loader.RegisterFunction(func);
 
+	auto &db = loader.GetDatabaseInstance();
 	auto &config = DBConfig::GetConfig(db);
 	config.replacement_scans.emplace_back(ReadStatReplacementScan);
 }

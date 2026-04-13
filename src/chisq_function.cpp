@@ -4,7 +4,7 @@
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/function/function_set.hpp"
 #include "duckdb/common/types/vector.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 
 #include <cmath>
 #include <string>
@@ -287,18 +287,18 @@ static void ChiSqGoFFinalize(Vector &state_vector, AggregateInputData &, Vector 
 
 } // namespace
 
-void RegisterChiSquareTests(DatabaseInstance &db) {
+void RegisterChiSquareTests(ExtensionLoader &loader) {
 	AggregateFunction ind_fn("chisq_independence", {LogicalType::VARCHAR, LogicalType::VARCHAR},
 	                          ChiSqIndependenceResultType(), AggregateFunction::StateSize<ChiSqIndependenceState>,
 	                          ChiSqIndInit, ChiSqIndUpdate, ChiSqIndCombine, ChiSqIndFinalize,
 	                          FunctionNullHandling::SPECIAL_HANDLING, nullptr, nullptr, ChiSqIndDestroy);
-	ExtensionUtil::RegisterFunction(db, ind_fn);
+	loader.RegisterFunction(ind_fn);
 
 	AggregateFunction gof_fn("chisq_goodness_of_fit", {LogicalType::VARCHAR}, ChiSqGoFResultType(),
 	                          AggregateFunction::StateSize<ChiSqGoFState>, ChiSqGoFInit, ChiSqGoFUpdate, ChiSqGoFCombine,
 	                          ChiSqGoFFinalize, FunctionNullHandling::SPECIAL_HANDLING, nullptr, nullptr,
 	                          ChiSqGoFDestroy);
-	ExtensionUtil::RegisterFunction(db, gof_fn);
+	loader.RegisterFunction(gof_fn);
 }
 
 } // namespace duckdb

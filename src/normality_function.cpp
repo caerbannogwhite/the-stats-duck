@@ -4,7 +4,7 @@
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/function/function_set.hpp"
 #include "duckdb/common/types/vector.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 
 #include <cmath>
 
@@ -176,11 +176,11 @@ static void JBFinalize(Vector &state_vector, AggregateInputData &, Vector &resul
 
 } // namespace
 
-void RegisterJarqueBera(DatabaseInstance &db) {
+void RegisterJarqueBera(ExtensionLoader &loader) {
 	AggregateFunction fn("jarque_bera", {LogicalType::DOUBLE}, JarqueBeraResultType(),
 	                     AggregateFunction::StateSize<JBState>, JBInit, JBUpdate, JBCombine, JBFinalize,
 	                     FunctionNullHandling::DEFAULT_NULL_HANDLING);
-	ExtensionUtil::RegisterFunction(db, fn);
+	loader.RegisterFunction(fn);
 }
 
 } // namespace duckdb

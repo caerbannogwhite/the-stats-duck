@@ -12,36 +12,34 @@
 #include "chisq_function.hpp"
 #include "read_stat_function.hpp"
 
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 
 namespace duckdb {
 
-static void LoadInternal(DuckDB &db) {
-	auto &instance = *db.instance;
-
+static void LoadInternal(ExtensionLoader &loader) {
 	// Hypothesis tests
-	RegisterTTest1SampAgg(instance);
-	RegisterTTest2SampAgg(instance);
-	RegisterTTestPairedAgg(instance);
-	RegisterMannWhitneyU(instance);
-	RegisterWilcoxonSignedRank(instance);
-	RegisterPearsonTest(instance);
-	RegisterJarqueBera(instance);
-	RegisterAnovaOneway(instance);
-	RegisterChiSquareTests(instance);
+	RegisterTTest1SampAgg(loader);
+	RegisterTTest2SampAgg(loader);
+	RegisterTTestPairedAgg(loader);
+	RegisterMannWhitneyU(loader);
+	RegisterWilcoxonSignedRank(loader);
+	RegisterPearsonTest(loader);
+	RegisterJarqueBera(loader);
+	RegisterAnovaOneway(loader);
+	RegisterChiSquareTests(loader);
 
 	// Descriptive statistics
-	RegisterSummaryStats(instance);
+	RegisterSummaryStats(loader);
 
 	// Scalar distribution functions (dnorm/pnorm/qnorm/dt/pt/qt/dchisq/...)
-	RegisterDistributionFunctions(instance);
+	RegisterDistributionFunctions(loader);
 
 	// Data import
-	RegisterReadStat(instance);
+	RegisterReadStat(loader);
 }
 
-void StatsDuckExtension::Load(DuckDB &db) {
-	LoadInternal(db);
+void StatsDuckExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader);
 }
 
 std::string StatsDuckExtension::Name() {
@@ -60,16 +58,8 @@ std::string StatsDuckExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void stats_duck_init(duckdb::DatabaseInstance &db) {
-	duckdb::DuckDB db_wrapper(db);
-	duckdb::LoadInternal(db_wrapper);
+DUCKDB_CPP_EXTENSION_ENTRY(stats_duck, loader) {
+	duckdb::LoadInternal(loader);
 }
 
-DUCKDB_EXTENSION_API const char *stats_duck_version() {
-	return duckdb::DuckDB::LibraryVersion();
 }
-}
-
-#ifndef DUCKDB_EXTENSION_MAIN
-#error DUCKDB_EXTENSION_MAIN not defined
-#endif

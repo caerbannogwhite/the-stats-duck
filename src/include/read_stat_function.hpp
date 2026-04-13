@@ -4,6 +4,6 @@
 
 namespace duckdb {
 
-void RegisterReadStat(DatabaseInstance &db);
+void RegisterReadStat(ExtensionLoader &loader);
 
 } // namespace duckdb

@@ -3,7 +3,7 @@
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/function/function_set.hpp"
 #include "duckdb/common/types/vector.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -219,12 +219,12 @@ static void SummaryStatsFinalize(Vector &state_vector, AggregateInputData &, Vec
 
 } // namespace
 
-void RegisterSummaryStats(DatabaseInstance &db) {
+void RegisterSummaryStats(ExtensionLoader &loader) {
 	AggregateFunction fn("summary_stats", {LogicalType::DOUBLE}, SummaryStatsResultType(),
 	                     AggregateFunction::StateSize<SummaryStatsState>, SummaryStatsInit, SummaryStatsUpdate,
 	                     SummaryStatsCombine, SummaryStatsFinalize, FunctionNullHandling::SPECIAL_HANDLING,
 	                     nullptr, nullptr, SummaryStatsDestroy);
-	ExtensionUtil::RegisterFunction(db, fn);
+	loader.RegisterFunction(fn);
 }
 
 } // namespace duckdb

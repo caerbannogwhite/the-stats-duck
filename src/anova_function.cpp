@@ -4,7 +4,7 @@
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/function/function_set.hpp"
 #include "duckdb/common/types/vector.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 
 #include <cmath>
 #include <string>
@@ -229,11 +229,11 @@ static void AnovaFinalize(Vector &state_vector, AggregateInputData &, Vector &re
 
 } // namespace
 
-void RegisterAnovaOneway(DatabaseInstance &db) {
+void RegisterAnovaOneway(ExtensionLoader &loader) {
 	AggregateFunction fn("anova_oneway", {LogicalType::DOUBLE, LogicalType::VARCHAR}, AnovaResultType(),
 	                     AggregateFunction::StateSize<AnovaState>, AnovaInit, AnovaUpdate, AnovaCombine, AnovaFinalize,
 	                     FunctionNullHandling::SPECIAL_HANDLING, nullptr, nullptr, AnovaDestroy);
-	ExtensionUtil::RegisterFunction(db, fn);
+	loader.RegisterFunction(fn);
 }
 
 } // namespace duckdb

@@ -9,6 +9,6 @@ namespace duckdb {
 //! test statistic is asymptotically chi-square with 2 degrees of freedom.
 //! Returns STRUCT(test_type, jb_statistic, skewness, excess_kurtosis, df,
 //! p_value, n).
-void RegisterJarqueBera(DatabaseInstance &db);
+void RegisterJarqueBera(ExtensionLoader &loader);
 
 } // namespace duckdb

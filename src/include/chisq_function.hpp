@@ -11,6 +11,6 @@ namespace duckdb {
 //!   chisq_goodness_of_fit(category) — goodness-of-fit test against the
 //!     uniform distribution over observed categories. Returns STRUCT(test_type,
 //!     chi_square, df, p_value, n, n_categories).
-void RegisterChiSquareTests(DatabaseInstance &db);
+void RegisterChiSquareTests(ExtensionLoader &loader);
 
 } // namespace duckdb

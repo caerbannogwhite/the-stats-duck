@@ -4,8 +4,8 @@
 
 namespace duckdb {
 
-void RegisterTTest1SampAgg(DatabaseInstance &db);
-void RegisterTTest2SampAgg(DatabaseInstance &db);
-void RegisterTTestPairedAgg(DatabaseInstance &db);
+void RegisterTTest1SampAgg(ExtensionLoader &loader);
+void RegisterTTest2SampAgg(ExtensionLoader &loader);
+void RegisterTTestPairedAgg(ExtensionLoader &loader);
 
 } // namespace duckdb
