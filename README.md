@@ -27,30 +27,71 @@ statistician without leaving SQL. The current release focuses on three areas:
   data, so it composes naturally with `GROUP BY`, window frames, and DuckDB's
   parallel execution.
 
-Future releases will broaden the toolkit with descriptive statistics helpers,
-distribution functions (PDF/CDF/quantile), correlation tests, ANOVA, normality
-tests, multiple-testing corrections, and regression with full diagnostics. See
-the project roadmap on GitHub for the current plan.
+Future releases will add Spearman/Kendall correlations, regression with full
+diagnostics, multiple-testing corrections, and more distribution families.
 
 ## Functions
 
-| Function                                                             | Category        | Description                              |
-| -------------------------------------------------------------------- | --------------- | ---------------------------------------- |
-| `ttest_1samp(column, [mu], [alpha], [alternative])`                  | Hypothesis test | One-sample t-test                        |
-| `ttest_2samp(column1, column2, [equal_var], [alpha], [alternative])` | Hypothesis test | Two-sample t-test (Welch's or Student's) |
-| `ttest_paired(column1, column2, [alpha], [alternative])`             | Hypothesis test | Paired t-test                            |
-| `mann_whitney_u(column1, column2, [alternative])`                    | Hypothesis test | Mann-Whitney U test (Wilcoxon rank-sum)  |
-| `wilcoxon_signed_rank(column1, column2, [alternative])`              | Hypothesis test | Wilcoxon signed-rank test                |
-| `read_stat(path, [format], [encoding])`                              | Data import     | Read SAS / SPSS / Stata files            |
+### Hypothesis tests (aggregate)
 
-The hypothesis tests are **aggregate functions** that return a `STRUCT`. The
-data import function is a **table function**.
+| Function                                                             | Description                              |
+| -------------------------------------------------------------------- | ---------------------------------------- |
+| `ttest_1samp(column, [mu], [alpha], [alternative])`                  | One-sample t-test                        |
+| `ttest_2samp(column1, column2, [equal_var], [alpha], [alternative])` | Two-sample t-test (Welch's or Student's) |
+| `ttest_paired(column1, column2, [alpha], [alternative])`             | Paired t-test                            |
+| `mann_whitney_u(column1, column2, [alternative])`                    | Mann-Whitney U test (Wilcoxon rank-sum)  |
+| `wilcoxon_signed_rank(column1, column2, [alternative])`              | Wilcoxon signed-rank test                |
+| `pearson_test(x, y, [alpha], [alternative])`                         | Pearson correlation with significance    |
+| `anova_oneway(value, group)`                                         | One-way ANOVA                            |
+| `chisq_independence(row, col)`                                       | Chi-square test of independence          |
+| `chisq_goodness_of_fit(category)`                                    | Chi-square goodness-of-fit (uniform)     |
+| `jarque_bera(column)`                                                | Jarque-Bera normality test               |
+
+All tests return a `STRUCT` with the test statistic, degrees of freedom,
+p-value, and relevant effect sizes / confidence intervals.
+
+### Descriptive statistics (aggregate)
+
+| Function                | Description                                                            |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `summary_stats(column)` | n, n_missing, mean, sd, variance, min, q1, median, q3, max, iqr, skewness, kurtosis |
+
+### Distribution functions (scalar)
+
+| Function                          | Description                  |
+| --------------------------------- | ---------------------------- |
+| `dnorm(x, [mean], [sd])`         | Normal PDF                   |
+| `pnorm(x, [mean], [sd])`         | Normal CDF                   |
+| `qnorm(p, [mean], [sd])`         | Normal quantile              |
+| `dt(x, df)`                      | Student's t PDF              |
+| `pt(x, df)`                      | Student's t CDF              |
+| `qt(p, df)`                      | Student's t quantile         |
+| `dchisq(x, df)`                  | Chi-square PDF               |
+| `pchisq(x, df)`                  | Chi-square CDF               |
+| `qchisq(p, df)`                  | Chi-square quantile          |
+| `df(x, df1, df2)`                | F distribution PDF           |
+| `pf(x, df1, df2)`                | F distribution CDF           |
+| `qf(p, df1, df2)`                | F distribution quantile      |
+
+### Data import (table function)
+
+| Function                              | Description                 |
+| ------------------------------------- | --------------------------- |
+| `read_stat(path, [format], [encoding])` | Read SAS / SPSS / Stata files |
 
 **t-test result fields:** `test_type`, `t_statistic`, `df`, `p_value`, `alternative`, `mean_diff`, `ci_lower`, `ci_upper`, `cohens_d`
 
 **Mann-Whitney result fields:** `test_type`, `u_statistic`, `z_statistic`, `p_value`, `alternative`, `rank_biserial`
 
 **Wilcoxon result fields:** `test_type`, `w_statistic`, `z_statistic`, `p_value`, `alternative`, `effect_size_r`
+
+**Pearson result fields:** `test_type`, `r`, `t_statistic`, `df`, `p_value`, `alternative`, `ci_lower`, `ci_upper`, `n`
+
+**ANOVA result fields:** `test_type`, `f_statistic`, `df_between`, `df_within`, `p_value`, `ss_between`, `ss_within`, `eta_squared`, `n_groups`, `n`
+
+**Chi-square result fields:** `test_type`, `chi_square`, `df`, `p_value`, `n`, `n_rows`/`n_cols` or `n_categories`
+
+**Jarque-Bera result fields:** `test_type`, `jb_statistic`, `skewness`, `excess_kurtosis`, `df`, `p_value`, `n`
 
 ### Common parameters
 

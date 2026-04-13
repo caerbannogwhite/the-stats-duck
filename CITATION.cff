@@ -14,6 +14,8 @@ authors:
     given-names: Massimo
 repository-code: "https://github.com/caerbannogwhite/the-stats-duck"
 url: "https://github.com/caerbannogwhite/the-stats-duck"
+version: 0.1.0-mortician
+date-released: "2026-04-13"
 license: Apache-2.0
 keywords:
   - duckdb
