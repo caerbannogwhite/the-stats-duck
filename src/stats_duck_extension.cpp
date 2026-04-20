@@ -11,31 +11,46 @@
 #include "anova_function.hpp"
 #include "chisq_function.hpp"
 #include "read_stat_function.hpp"
+#include "ggsql_parser_extension.hpp"
 
 #include "duckdb/main/extension/extension_loader.hpp"
 
+#include <cstdio>
+
 namespace duckdb {
+
+#define TRY_REGISTER(call)                                                                                              \
+	do {                                                                                                                \
+		std::fprintf(stderr, "[stats_duck] before " #call "\n");                                                        \
+		std::fflush(stderr);                                                                                            \
+		call;                                                                                                           \
+		std::fprintf(stderr, "[stats_duck] after  " #call "\n");                                                        \
+		std::fflush(stderr);                                                                                            \
+	} while (0)
 
 static void LoadInternal(ExtensionLoader &loader) {
 	// Hypothesis tests
-	RegisterTTest1SampAgg(loader);
-	RegisterTTest2SampAgg(loader);
-	RegisterTTestPairedAgg(loader);
-	RegisterMannWhitneyU(loader);
-	RegisterWilcoxonSignedRank(loader);
-	RegisterPearsonTest(loader);
-	RegisterJarqueBera(loader);
-	RegisterAnovaOneway(loader);
-	RegisterChiSquareTests(loader);
+	TRY_REGISTER(RegisterTTest1SampAgg(loader));
+	TRY_REGISTER(RegisterTTest2SampAgg(loader));
+	TRY_REGISTER(RegisterTTestPairedAgg(loader));
+	TRY_REGISTER(RegisterMannWhitneyU(loader));
+	TRY_REGISTER(RegisterWilcoxonSignedRank(loader));
+	TRY_REGISTER(RegisterPearsonTest(loader));
+	TRY_REGISTER(RegisterJarqueBera(loader));
+	TRY_REGISTER(RegisterAnovaOneway(loader));
+	TRY_REGISTER(RegisterChiSquareTests(loader));
 
 	// Descriptive statistics
-	RegisterSummaryStats(loader);
+	TRY_REGISTER(RegisterSummaryStats(loader));
 
 	// Scalar distribution functions (dnorm/pnorm/qnorm/dt/pt/qt/dchisq/...)
-	RegisterDistributionFunctions(loader);
+	TRY_REGISTER(RegisterDistributionFunctions(loader));
 
 	// Data import
-	RegisterReadStat(loader);
+	TRY_REGISTER(RegisterReadStat(loader));
+
+	// Parser extension spike (ggsql)
+	TRY_REGISTER(RegisterGgsqlParserExtension(loader));
 }
 
 void StatsDuckExtension::Load(ExtensionLoader &loader) {

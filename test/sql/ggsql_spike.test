@@ -1,0 +1,30 @@
+# name: test/sql/ggsql_spike.test
+# description: Parser extension spike — GGSQL PING returns 'pong'
+# group: [stats_duck]
+
+require stats_duck
+
+query T
+GGSQL PING
+----
+pong
+
+query T
+ggsql ping
+----
+pong
+
+query T
+GGSQL PING;
+----
+pong
+
+statement error
+GGSQL
+----
+GGSQL requires a command
+
+statement error
+GGSQL UNKNOWN_CMD
+----
+Unknown GGSQL command

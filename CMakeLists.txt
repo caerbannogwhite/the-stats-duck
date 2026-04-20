@@ -73,6 +73,7 @@ set(EXTENSION_SOURCES
     src/chisq_function.cpp
     src/read_stat_function.cpp
     src/read_stat_types.cpp
+    src/ggsql_parser_extension.cpp
     ${READSTAT_SOURCES})
 
 # ── Platform-specific iconv/zlib handling ────────────────────────────────────
