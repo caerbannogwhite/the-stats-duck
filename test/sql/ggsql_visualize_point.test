@@ -1,0 +1,44 @@
+# name: test/sql/ggsql_visualize_point.test
+# description: ggsql phase 1 — VISUALIZE ... DRAW point produces Vega-Lite scatter spec
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7), (39.5, 17.4), (40.3, 18.0)) AS t(bill_len, bill_dep);
+
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Lowercase keywords work
+query TT
+visualize bill_len as x, bill_dep as y from penguins draw point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Trailing semicolon tolerated
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point;
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Unknown mark — phase 1 only supports "point"
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW nope
+----
+unknown mark 'nope'
+
+# Missing DRAW clause
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins
+----
+At least one 'DRAW <mark>' clause is required
+
+# Missing AS
+statement error
+VISUALIZE bill_len x, bill_dep AS y FROM penguins DRAW point
+----
+Expected 'AS'

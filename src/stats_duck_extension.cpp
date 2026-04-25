@@ -11,6 +11,7 @@
 #include "anova_function.hpp"
 #include "chisq_function.hpp"
 #include "read_stat_function.hpp"
+#include "ggsql.hpp"
 
 #include "duckdb/main/extension/extension_loader.hpp"
 
@@ -36,6 +37,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Data import
 	RegisterReadStat(loader);
+
+	// ggsql: Grammar of Graphics for SQL (parser extension + marks)
+	RegisterGgsql(loader);
 }
 
 void StatsDuckExtension::Load(ExtensionLoader &loader) {
