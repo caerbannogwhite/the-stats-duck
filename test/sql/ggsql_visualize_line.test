@@ -1,0 +1,19 @@
+# name: test/sql/ggsql_visualize_line.test
+# description: ggsql DRAW line — produces Vega-Lite line spec with ORDER BY x in data SQL
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7), (39.5, 17.4), (40.3, 18.0)) AS t(bill_len, bill_dep);
+
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW line
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y FROM penguins) ORDER BY x'}
+
+statement error
+VISUALIZE bill_len AS x FROM penguins DRAW line
+----
+'line' requires 'y' aesthetic

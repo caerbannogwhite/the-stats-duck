@@ -25,11 +25,17 @@ VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point;
 ----
 {"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
 
-# Unknown mark — phase 1 only supports "point"
+# Unknown mark
 statement error
 VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW nope
 ----
 unknown mark 'nope'
+
+# Aesthetic validation: point requires x and y
+statement error
+VISUALIZE bill_len AS x FROM penguins DRAW point
+----
+'point' requires 'y' aesthetic
 
 # Missing DRAW clause
 statement error

@@ -1,0 +1,25 @@
+# name: test/sql/ggsql_visualize_histogram.test
+# description: ggsql DRAW histogram — Vega-Lite bar mark with bin:true; data passes raw x
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1), (39.5), (40.3), (36.7), (39.3), (44.0)) AS t(bill_len);
+
+query TT
+VISUALIZE bill_len AS x FROM penguins DRAW histogram
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"bar","encoding":{"x":{"field":"x","type":"quantitative","bin":true},"y":{"aggregate":"count","type":"quantitative"}}}	{layer_0=SELECT bill_len AS x FROM penguins}
+
+# y aesthetic is silently ignored for histogram (vega-lite computes count)
+query TT
+VISUALIZE bill_len AS x, bill_len AS y FROM penguins DRAW histogram
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"bar","encoding":{"x":{"field":"x","type":"quantitative","bin":true},"y":{"aggregate":"count","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_len AS y FROM penguins'}
+
+statement error
+VISUALIZE bill_len AS y FROM penguins DRAW histogram
+----
+'histogram' requires 'x' aesthetic

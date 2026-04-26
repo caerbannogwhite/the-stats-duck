@@ -30,24 +30,69 @@ string BuildProjectedSql(const VisualizeStatement &stmt) {
 	return sql;
 }
 
-// Phase 1: hardcoded mark table. Phase 3 will replace this with a proper
-// registry so external extensions (e.g., bio-stats) can plug in their own marks.
-// Each entry returns the Vega-Lite layer fragment (without $schema or data keys)
+// Hardcoded mark table. Phase 3 will replace this with a proper registry so
+// external extensions (e.g., bio-stats) can plug in their own marks. Each
+// entry returns the Vega-Lite layer fragment (without $schema or data keys)
 // plus the SQL that computes that layer's data.
 struct MarkResult {
 	string layer_json_body; // the layer fragment keys AFTER the opening '{'
 	string data_sql;        // the SQL that produces this layer's data
 };
 
-MarkResult RenderMark(const string &mark, const string &projected_sql) {
+bool HasAesthetic(const VisualizeStatement &stmt, const char *name) {
+	for (const auto &a : stmt.aesthetics) {
+		if (StringUtil::CIEquals(a.aesthetic, name)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void RequireAesthetic(const VisualizeStatement &stmt, const string &mark, const char *aesthetic) {
+	if (!HasAesthetic(stmt, aesthetic)) {
+		throw InvalidInputException("ggsql: '%s' requires '%s' aesthetic", mark, aesthetic);
+	}
+}
+
+MarkResult RenderMark(const string &mark, const VisualizeStatement &stmt,
+                      const string &projected_sql) {
 	if (StringUtil::CIEquals(mark, "point")) {
+		RequireAesthetic(stmt, mark, "x");
+		RequireAesthetic(stmt, mark, "y");
 		MarkResult r;
 		r.layer_json_body =
-		    R"("mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}})";
+		    R"("mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}})";
 		r.data_sql = projected_sql;
 		return r;
 	}
-	throw InvalidInputException("ggsql: unknown mark '%s' (phase 1 supports: point)", mark);
+	if (StringUtil::CIEquals(mark, "line")) {
+		RequireAesthetic(stmt, mark, "x");
+		RequireAesthetic(stmt, mark, "y");
+		MarkResult r;
+		r.layer_json_body =
+		    R"("mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}})";
+		r.data_sql = "SELECT * FROM (" + projected_sql + ") ORDER BY x";
+		return r;
+	}
+	if (StringUtil::CIEquals(mark, "bar")) {
+		RequireAesthetic(stmt, mark, "x");
+		RequireAesthetic(stmt, mark, "y");
+		MarkResult r;
+		r.layer_json_body =
+		    R"("mark":"bar","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"quantitative"}})";
+		r.data_sql = "SELECT x, SUM(y) AS y FROM (" + projected_sql + ") GROUP BY x ORDER BY x";
+		return r;
+	}
+	if (StringUtil::CIEquals(mark, "histogram")) {
+		RequireAesthetic(stmt, mark, "x");
+		MarkResult r;
+		r.layer_json_body =
+		    R"("mark":"bar","encoding":{"x":{"field":"x","type":"quantitative","bin":true},"y":{"aggregate":"count","type":"quantitative"}})";
+		r.data_sql = projected_sql;
+		return r;
+	}
+	throw InvalidInputException(
+	    "ggsql: unknown mark '%s' (supported: point, line, bar, histogram)", mark);
 }
 
 struct CompiledResult {
@@ -63,13 +108,14 @@ CompiledResult Compile(const VisualizeStatement &stmt) {
 	string projected_sql = BuildProjectedSql(stmt);
 	const auto &layer = stmt.layers[0];
 	string layer_name = "layer_0";
-	auto rendered = RenderMark(layer.mark, projected_sql);
+	auto rendered = RenderMark(layer.mark, stmt, projected_sql);
 
 	string spec =
 	    R"({"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":")";
 	spec += layer_name;
 	spec += R"("},)";
 	spec += rendered.layer_json_body;
+	spec += "}";
 
 	CompiledResult out;
 	out.spec_json = std::move(spec);
