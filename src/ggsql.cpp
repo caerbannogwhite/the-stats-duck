@@ -66,13 +66,26 @@ bool HasFacet(const VisualizeStatement &stmt) {
 	return false;
 }
 
-// Inject `,"scale":{"scheme":"<scheme>"}` into the given encoding channel of a
-// rendered layer_body. Relies on the current encoding format using only
-// primitive sub-properties (no nested objects), so the first '}' after the
-// channel's opening '{' is the closing brace.
+// Inject `,"scale":{<merged-properties>}` into each encoding channel that has
+// at least one matching ScaleSpec. Relies on the current encoding format using
+// only primitive sub-properties (no nested objects), so the first '}' after the
+// channel's opening '{' is the closing brace. Multiple SCALE clauses on the
+// same channel merge into one scale object.
 string ApplyScales(string layer_body, const vector<ScaleSpec> &scales) {
+	// Preserve user-specified order while grouping by channel.
+	std::map<string, string> merged; // channel → comma-separated "key":value list
+	std::vector<string> order;
 	for (const auto &scale : scales) {
-		string needle = "\"" + scale.aesthetic + "\":{";
+		auto it = merged.find(scale.aesthetic);
+		if (it == merged.end()) {
+			merged[scale.aesthetic] = "\"" + scale.property + "\":" + scale.value_json;
+			order.push_back(scale.aesthetic);
+		} else {
+			it->second += ",\"" + scale.property + "\":" + scale.value_json;
+		}
+	}
+	for (const auto &channel : order) {
+		string needle = "\"" + channel + "\":{";
 		size_t pos = layer_body.find(needle);
 		if (pos == string::npos) {
 			continue; // channel not mapped → silently ignore
@@ -82,7 +95,7 @@ string ApplyScales(string layer_body, const vector<ScaleSpec> &scales) {
 		if (close_brace == string::npos) {
 			continue;
 		}
-		string injection = ",\"scale\":{\"scheme\":\"" + scale.scheme + "\"}";
+		string injection = ",\"scale\":{" + merged[channel] + "}";
 		layer_body.insert(close_brace, injection);
 	}
 	return layer_body;

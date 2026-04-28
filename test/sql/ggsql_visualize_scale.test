@@ -38,14 +38,38 @@ VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW poin
 ----
 {"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}}}]}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins', layer_1='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins) ORDER BY x'}
 
-# SCALE without TO — clean error.
+# Unknown SCALE operator — clean error listing the valid options.
 statement error
 VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point SCALE color viridis
 ----
-Expected 'TO'
+Unknown SCALE operator 'viridis'
 
 # SCALE TO without scheme name — clean error.
 statement error
 VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point SCALE color TO
 ----
 Expected scheme name after 'SCALE <aesthetic> TO'
+
+# Phase 11: SCALE y ZERO false — exclude zero from the scale.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE y ZERO false
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative","scale":{"zero":false}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Phase 11: SCALE x DOMAIN <lo> <hi> — explicit numeric domain.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE x DOMAIN 30 50
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative","scale":{"domain":[30,50]}},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Phase 11: multiple SCALE clauses on the same channel merge into one scale block.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE x DOMAIN 30 50 SCALE x ZERO false
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative","scale":{"domain":[30,50],"zero":false}},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Invalid bool after ZERO — clean error.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE y ZERO yes
+----
+Expected 'true' or 'false'

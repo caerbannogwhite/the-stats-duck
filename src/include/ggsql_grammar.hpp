@@ -13,8 +13,9 @@ struct DrawLayer {
 };
 
 struct ScaleSpec {
-	string aesthetic; // channel name to scale (color, fill, ...)
-	string scheme;    // Vega-Lite scheme name (accent, viridis, category10, ...)
+	string aesthetic;  // channel to scale (x, y, color, ...)
+	string property;   // Vega-Lite scale property: "scheme", "domain", "zero", ...
+	string value_json; // value formatted as JSON ('"viridis"', '[0,100]', 'false', ...)
 };
 
 struct TypeOverride {

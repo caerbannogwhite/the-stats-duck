@@ -285,7 +285,11 @@ ParseResult ParseGgsql(const string &query) {
 		}
 	}
 
-	// Optional `SCALE <aesthetic> TO <scheme>` clauses, zero or more.
+	// Optional `SCALE <aesthetic> <op> <args...>` clauses, zero or more.
+	// Supported ops:
+	//   TO <scheme>             — color scheme name
+	//   ZERO <true|false>       — include zero in quantitative scale
+	//   DOMAIN <num1> <num2>    — explicit numeric domain
 	while (!at_end() && IEqual(peek(), "SCALE")) {
 		i++;
 		if (at_end()) {
@@ -294,14 +298,52 @@ ParseResult ParseGgsql(const string &query) {
 		}
 		ScaleSpec scale;
 		scale.aesthetic = tokens[i++];
-		if (!consume("TO")) {
-			return result;
-		}
 		if (at_end()) {
-			result.error = "Expected scheme name after 'SCALE <aesthetic> TO'";
+			result.error = "Expected SCALE operator (TO / ZERO / DOMAIN) after aesthetic";
 			return result;
 		}
-		scale.scheme = tokens[i++];
+		string op = tokens[i++];
+		if (IEqual(op, "TO")) {
+			if (at_end()) {
+				result.error = "Expected scheme name after 'SCALE <aesthetic> TO'";
+				return result;
+			}
+			scale.property = "scheme";
+			scale.value_json = "\"" + tokens[i++] + "\"";
+		} else if (IEqual(op, "ZERO")) {
+			if (at_end()) {
+				result.error = "Expected boolean (true/false) after 'SCALE <aesthetic> ZERO'";
+				return result;
+			}
+			string v = tokens[i++];
+			if (IEqual(v, "true")) {
+				scale.value_json = "true";
+			} else if (IEqual(v, "false")) {
+				scale.value_json = "false";
+			} else {
+				result.error = "Expected 'true' or 'false' after 'SCALE <aesthetic> ZERO', got '" +
+				               v + "'";
+				return result;
+			}
+			scale.property = "zero";
+		} else if (IEqual(op, "DOMAIN")) {
+			if (at_end()) {
+				result.error = "Expected two numeric bounds after 'SCALE <aesthetic> DOMAIN'";
+				return result;
+			}
+			string lo = tokens[i++];
+			if (at_end()) {
+				result.error = "Expected upper bound after 'SCALE <aesthetic> DOMAIN <lo>'";
+				return result;
+			}
+			string hi = tokens[i++];
+			scale.property = "domain";
+			scale.value_json = "[" + lo + "," + hi + "]";
+		} else {
+			result.error = "Unknown SCALE operator '" + op +
+			               "' (expected TO / ZERO / DOMAIN)";
+			return result;
+		}
 		result.stmt.scales.push_back(std::move(scale));
 	}
 
