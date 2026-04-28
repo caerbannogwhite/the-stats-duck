@@ -185,10 +185,36 @@ ParseResult ParseGgsql(const string &query) {
 			expr += tokens[k];
 		}
 
+		// Aesthetic may carry a `:type` suffix (e.g. `color:nominal`) — split it.
+		string aesth_token = tokens[aesth_idx];
+		size_t colon = aesth_token.find(':');
+		string type_override;
+		if (colon != string::npos) {
+			type_override = aesth_token.substr(colon + 1);
+			aesth_token = aesth_token.substr(0, colon);
+			if (aesth_token.empty()) {
+				result.error = "Empty aesthetic name before ':'";
+				return result;
+			}
+			if (type_override != "quantitative" && type_override != "ordinal" &&
+			    type_override != "nominal" && type_override != "temporal") {
+				result.error =
+				    "Invalid aesthetic type '" + type_override +
+				    "' (expected quantitative, ordinal, nominal, or temporal)";
+				return result;
+			}
+		}
+
 		AestheticMapping mapping;
 		mapping.expression = std::move(expr);
-		mapping.aesthetic = tokens[aesth_idx];
+		mapping.aesthetic = aesth_token;
 		result.stmt.aesthetics.push_back(std::move(mapping));
+		if (!type_override.empty()) {
+			TypeOverride ov;
+			ov.aesthetic = aesth_token;
+			ov.type = std::move(type_override);
+			result.stmt.type_overrides.push_back(std::move(ov));
+		}
 		i = boundary;
 
 		if (!at_end() && peek() == ",") {

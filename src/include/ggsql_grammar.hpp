@@ -17,11 +17,17 @@ struct ScaleSpec {
 	string scheme;    // Vega-Lite scheme name (accent, viridis, category10, ...)
 };
 
+struct TypeOverride {
+	string aesthetic; // channel name (color, x, ...)
+	string type;      // quantitative | ordinal | nominal | temporal
+};
+
 struct VisualizeStatement {
 	vector<AestheticMapping> aesthetics;
 	string from_table;
 	vector<DrawLayer> layers;
 	vector<ScaleSpec> scales;
+	vector<TypeOverride> type_overrides;
 };
 
 struct ParseResult {

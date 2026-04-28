@@ -88,6 +88,36 @@ string ApplyScales(string layer_body, const vector<ScaleSpec> &scales) {
 	return layer_body;
 }
 
+// Replace the rendered "type":"..." inside the targeted channel with the user's
+// override. Same lookup pattern as ApplyScales — find the channel block, locate
+// the type field within it, swap the value.
+string ApplyTypeOverrides(string layer_body, const vector<TypeOverride> &overrides) {
+	for (const auto &ov : overrides) {
+		string needle = "\"" + ov.aesthetic + "\":{";
+		size_t pos = layer_body.find(needle);
+		if (pos == string::npos) {
+			continue; // channel not mapped → silently ignore
+		}
+		size_t open_brace = pos + needle.size() - 1;
+		size_t close_brace = layer_body.find('}', open_brace + 1);
+		if (close_brace == string::npos) {
+			continue;
+		}
+		const string type_key = "\"type\":\"";
+		size_t type_pos = layer_body.find(type_key, open_brace);
+		if (type_pos == string::npos || type_pos >= close_brace) {
+			continue;
+		}
+		size_t value_start = type_pos + type_key.size();
+		size_t value_end = layer_body.find('"', value_start);
+		if (value_end == string::npos || value_end >= close_brace) {
+			continue;
+		}
+		layer_body.replace(value_start, value_end - value_start, ov.type);
+	}
+	return layer_body;
+}
+
 CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 	if (stmt.layers.empty()) {
 		throw InvalidInputException("ggsql: at least one DRAW clause is required");
@@ -103,6 +133,7 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 		// `spec` sibling of `facet`.
 		const string layer_name = "layer_0";
 		MarkResult rendered = RenderLayer(context, stmt, stmt.layers[0], projected_sql);
+		rendered.layer_body = ApplyTypeOverrides(std::move(rendered.layer_body), stmt.type_overrides);
 		rendered.layer_body = ApplyScales(std::move(rendered.layer_body), stmt.scales);
 
 		string spec =
@@ -133,6 +164,7 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 		}
 		string layer_name = "layer_" + std::to_string(i);
 		MarkResult rendered = RenderLayer(context, stmt, stmt.layers[i], projected_sql);
+		rendered.layer_body = ApplyTypeOverrides(std::move(rendered.layer_body), stmt.type_overrides);
 		rendered.layer_body = ApplyScales(std::move(rendered.layer_body), stmt.scales);
 		layer_array += R"({"data":{"name":")";
 		layer_array += layer_name;
