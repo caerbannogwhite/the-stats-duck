@@ -45,15 +45,8 @@ struct CompiledResult {
 	vector<pair<string, string>> layer_sqls;
 };
 
-CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
-	if (stmt.layers.size() != 1) {
-		throw InvalidInputException("ggsql phase 1 supports exactly one DRAW clause (got %llu)",
-		                            static_cast<unsigned long long>(stmt.layers.size()));
-	}
-	string projected_sql = BuildProjectedSql(stmt);
-	const auto &layer = stmt.layers[0];
-	string layer_name = "layer_0";
-
+MarkResult RenderLayer(ClientContext &context, const VisualizeStatement &stmt,
+                       const DrawLayer &layer, const string &projected_sql) {
 	const auto &info = LookupMark(context, layer.mark);
 	for (const auto &req : info.required_aesthetics) {
 		if (!HasAesthetic(stmt, req)) {
@@ -61,18 +54,53 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 		}
 	}
 	MarkContext ctx{stmt.aesthetics, projected_sql};
-	MarkResult rendered = info.render(ctx);
+	return info.render(ctx);
+}
 
-	string spec =
-	    R"({"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":")";
-	spec += layer_name;
-	spec += R"("},)";
-	spec += rendered.layer_body;
-	spec += "}";
-
+CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
+	if (stmt.layers.empty()) {
+		throw InvalidInputException("ggsql: at least one DRAW clause is required");
+	}
+	string projected_sql = BuildProjectedSql(stmt);
 	CompiledResult out;
+
+	if (stmt.layers.size() == 1) {
+		// Single layer: emit canonical Vega-Lite single-view shape (top-level
+		// data + mark + encoding). Byte-identical to phase 3.
+		const string layer_name = "layer_0";
+		MarkResult rendered = RenderLayer(context, stmt, stmt.layers[0], projected_sql);
+
+		string spec =
+		    R"({"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":")";
+		spec += layer_name;
+		spec += R"("},)";
+		spec += rendered.layer_body;
+		spec += "}";
+
+		out.spec_json = std::move(spec);
+		out.layer_sqls.emplace_back(layer_name, std::move(rendered.data_sql));
+		return out;
+	}
+
+	// Multi-layer: emit Vega-Lite layer:[...] array. Each layer gets its own
+	// data:{name:"layer_<i>"} binding because layers can have different data_sql
+	// (e.g., point uses raw projected_sql, line wraps with ORDER BY x).
+	string spec = R"({"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[)";
+	for (size_t i = 0; i < stmt.layers.size(); i++) {
+		if (i > 0) {
+			spec += ",";
+		}
+		string layer_name = "layer_" + std::to_string(i);
+		MarkResult rendered = RenderLayer(context, stmt, stmt.layers[i], projected_sql);
+		spec += R"({"data":{"name":")";
+		spec += layer_name;
+		spec += R"("},)";
+		spec += rendered.layer_body;
+		spec += "}";
+		out.layer_sqls.emplace_back(layer_name, std::move(rendered.data_sql));
+	}
+	spec += "]}";
 	out.spec_json = std::move(spec);
-	out.layer_sqls.emplace_back(layer_name, std::move(rendered.data_sql));
 	return out;
 }
 

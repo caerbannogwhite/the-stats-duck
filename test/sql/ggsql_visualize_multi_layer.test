@@ -1,0 +1,46 @@
+# name: test/sql/ggsql_visualize_multi_layer.test
+# description: Phase 4a — multiple DRAW clauses emit Vega-Lite layer:[...] shape
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7), (39.5, 17.4), (40.3, 18.0)) AS t(bill_len, bill_dep);
+
+# Two-layer overlay: scatter + line. Each layer keeps its own data binding +
+# its own data_sql (point=raw, line=ordered).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW line
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}]}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins', layer_1='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y FROM penguins) ORDER BY x'}
+
+# Same mark twice → identical bodies but distinct positional layer names.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}]}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins', layer_1='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Three layers with distinct data_sql shapes (point=raw, line=ordered, bar=grouped+summed).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW line DRAW bar
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_2"},"mark":"bar","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"quantitative"}}}]}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins', layer_1='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y FROM penguins) ORDER BY x', layer_2='SELECT x, SUM(y) AS y FROM (SELECT bill_len AS x, bill_dep AS y FROM penguins) GROUP BY x ORDER BY x'}
+
+# Histogram only requires x; can coexist with marks needing x+y when both are mapped.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW histogram
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"bar","encoding":{"x":{"field":"x","type":"quantitative","bin":true},"y":{"aggregate":"count","type":"quantitative"}}}]}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins', layer_1='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Per-layer aesthetic validation: error originates from whichever layer's mark fails first.
+statement error
+VISUALIZE bill_len AS x FROM penguins DRAW point DRAW bar
+----
+'point' requires 'y' aesthetic
+
+# Same statement reordered — error reports the failing mark, not the position.
+statement error
+VISUALIZE bill_len AS x FROM penguins DRAW histogram DRAW bar
+----
+'bar' requires 'y' aesthetic
