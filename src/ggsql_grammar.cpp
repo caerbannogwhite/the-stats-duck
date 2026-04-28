@@ -7,19 +7,67 @@ namespace ggsql {
 
 namespace {
 
-// Tokenizer: splits on whitespace, emits commas as their own token, drops trailing
-// semicolons. Quoted identifiers and string literals are NOT supported in phase 1.
-vector<string> Tokenize(const string &input) {
+struct TokenizeResult {
 	vector<string> tokens;
+	string error;
+};
+
+// Tokenizer: at depth 0, splits on whitespace and emits commas as their own
+// token. Inside parens or quotes (single or double) all characters are
+// accumulated into the current token so that `coalesce(a, b)`, `"my col"`,
+// `'don''t'`, and `(SELECT max(x) FROM t)` all become single tokens. SQL
+// doubled-quote escapes (`''` and `""`) are handled. Trailing semicolons are
+// dropped.
+TokenizeResult Tokenize(const string &input) {
+	TokenizeResult out;
+	auto &tokens = out.tokens;
 	string current;
+	int paren_depth = 0;
+	char quote_char = 0;
+
 	auto flush = [&]() {
 		if (!current.empty()) {
 			tokens.push_back(std::move(current));
 			current.clear();
 		}
 	};
-	for (char c : input) {
-		if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+
+	for (size_t i = 0; i < input.size(); i++) {
+		char c = input[i];
+
+		if (quote_char != 0) {
+			current += c;
+			if (c == quote_char) {
+				if (i + 1 < input.size() && input[i + 1] == quote_char) {
+					current += input[++i]; // SQL '' / "" escape
+				} else {
+					quote_char = 0;
+				}
+			}
+			continue;
+		}
+
+		if (c == '\'' || c == '"') {
+			current += c;
+			quote_char = c;
+			continue;
+		}
+
+		if (paren_depth > 0) {
+			if (c == '(') {
+				paren_depth++;
+			} else if (c == ')') {
+				paren_depth--;
+			}
+			current += c;
+			continue;
+		}
+
+		// Outside parens, outside quotes.
+		if (c == '(') {
+			paren_depth++;
+			current += c;
+		} else if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
 			flush();
 		} else if (c == ',') {
 			flush();
@@ -31,7 +79,14 @@ vector<string> Tokenize(const string &input) {
 		}
 	}
 	flush();
-	return tokens;
+
+	if (quote_char != 0) {
+		out.error = string("Unterminated string literal or quoted identifier (missing closing ") +
+		            quote_char + ")";
+	} else if (paren_depth != 0) {
+		out.error = "Unbalanced parentheses in input";
+	}
+	return out;
 }
 
 bool IEqual(const string &tok, const char *kw) {
@@ -42,7 +97,12 @@ bool IEqual(const string &tok, const char *kw) {
 
 ParseResult ParseGgsql(const string &query) {
 	ParseResult result;
-	auto tokens = Tokenize(query);
+	auto tokenized = Tokenize(query);
+	if (!tokenized.error.empty()) {
+		result.error = tokenized.error;
+		return result;
+	}
+	auto &tokens = tokenized.tokens;
 	size_t i = 0;
 
 	auto at_end = [&]() { return i >= tokens.size(); };

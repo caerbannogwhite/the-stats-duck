@@ -38,14 +38,6 @@ VISUALIZE AS x FROM penguins DRAW point
 ----
 Empty expression before 'AS'
 
-# Documented limitation: top-level commas inside expressions break the boundary
-# scan. `coalesce(bill_len, bill_dep)` would parse as two separate mappings; the
-# error surfaces from the first mapping (which is missing AS).
-statement error
-VISUALIZE coalesce(bill_len, bill_dep) AS x, bill_dep AS y FROM penguins DRAW point
-----
-Expected 'AS' before aesthetic 'coalesce(bill_len'
-
 # Trailing AS without aesthetic — clean error.
 statement error
 VISUALIZE bill_len AS FROM penguins DRAW point
