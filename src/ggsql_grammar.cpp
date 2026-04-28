@@ -207,7 +207,7 @@ ParseResult ParseGgsql(const string &query) {
 	}
 	result.stmt.from_table = tokens[i++];
 
-	while (!at_end() && !IEqual(peek(), "FACET")) {
+	while (!at_end() && !IEqual(peek(), "FACET") && !IEqual(peek(), "SCALE")) {
 		if (!consume("DRAW")) {
 			return result;
 		}
@@ -233,12 +233,12 @@ ParseResult ParseGgsql(const string &query) {
 		if (!consume("BY")) {
 			return result;
 		}
-		if (at_end()) {
+		if (at_end() || IEqual(peek(), "SCALE")) {
 			result.error = "Expected expression after 'FACET BY'";
 			return result;
 		}
 		string expr;
-		while (!at_end()) {
+		while (!at_end() && !IEqual(peek(), "SCALE")) {
 			if (!expr.empty()) {
 				expr += " ";
 			}
@@ -248,6 +248,31 @@ ParseResult ParseGgsql(const string &query) {
 		facet.expression = std::move(expr);
 		facet.aesthetic = "facet";
 		result.stmt.aesthetics.push_back(std::move(facet));
+	}
+
+	// Optional `SCALE <aesthetic> TO <scheme>` clauses, zero or more.
+	while (!at_end() && IEqual(peek(), "SCALE")) {
+		i++;
+		if (at_end()) {
+			result.error = "Expected aesthetic name after 'SCALE'";
+			return result;
+		}
+		ScaleSpec scale;
+		scale.aesthetic = tokens[i++];
+		if (!consume("TO")) {
+			return result;
+		}
+		if (at_end()) {
+			result.error = "Expected scheme name after 'SCALE <aesthetic> TO'";
+			return result;
+		}
+		scale.scheme = tokens[i++];
+		result.stmt.scales.push_back(std::move(scale));
+	}
+
+	if (!at_end()) {
+		result.error = "Unexpected token '" + tokens[i] + "' after VISUALIZE clause";
+		return result;
 	}
 
 	result.success = true;

@@ -66,6 +66,28 @@ bool HasFacet(const VisualizeStatement &stmt) {
 	return false;
 }
 
+// Inject `,"scale":{"scheme":"<scheme>"}` into the given encoding channel of a
+// rendered layer_body. Relies on the current encoding format using only
+// primitive sub-properties (no nested objects), so the first '}' after the
+// channel's opening '{' is the closing brace.
+string ApplyScales(string layer_body, const vector<ScaleSpec> &scales) {
+	for (const auto &scale : scales) {
+		string needle = "\"" + scale.aesthetic + "\":{";
+		size_t pos = layer_body.find(needle);
+		if (pos == string::npos) {
+			continue; // channel not mapped → silently ignore
+		}
+		size_t open_brace = pos + needle.size() - 1;
+		size_t close_brace = layer_body.find('}', open_brace + 1);
+		if (close_brace == string::npos) {
+			continue;
+		}
+		string injection = ",\"scale\":{\"scheme\":\"" + scale.scheme + "\"}";
+		layer_body.insert(close_brace, injection);
+	}
+	return layer_body;
+}
+
 CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 	if (stmt.layers.empty()) {
 		throw InvalidInputException("ggsql: at least one DRAW clause is required");
@@ -81,6 +103,7 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 		// `spec` sibling of `facet`.
 		const string layer_name = "layer_0";
 		MarkResult rendered = RenderLayer(context, stmt, stmt.layers[0], projected_sql);
+		rendered.layer_body = ApplyScales(std::move(rendered.layer_body), stmt.scales);
 
 		string spec =
 		    R"({"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":")";
@@ -110,6 +133,7 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 		}
 		string layer_name = "layer_" + std::to_string(i);
 		MarkResult rendered = RenderLayer(context, stmt, stmt.layers[i], projected_sql);
+		rendered.layer_body = ApplyScales(std::move(rendered.layer_body), stmt.scales);
 		layer_array += R"({"data":{"name":")";
 		layer_array += layer_name;
 		layer_array += R"("},)";

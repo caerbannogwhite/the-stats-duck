@@ -1,0 +1,51 @@
+# name: test/sql/ggsql_visualize_scale.test
+# description: Phase 6c — SCALE <aesthetic> TO <scheme> attaches a Vega-Lite color scheme to the targeted channel
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7, 'Adelie'), (39.5, 17.4, 'Adelie'), (44.0, 18.0, 'Gentoo')) AS t(bill_len, bill_dep, species);
+
+# Single SCALE injects scale:{scheme:...} into the matching channel.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point SCALE color TO viridis
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins'}
+
+# Multiple SCALE clauses each target their own channel.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color, species AS fill FROM penguins DRAW point SCALE color TO viridis SCALE fill TO accent
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}},"fill":{"field":"fill","type":"nominal","scale":{"scheme":"accent"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color, species AS fill FROM penguins'}
+
+# SCALE on a channel that was never mapped is a silent no-op (warning-friendly).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE color TO viridis
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# FACET BY composes with SCALE — both clauses present, both applied.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point FACET BY species SCALE color TO viridis
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"field":"facet","type":"nominal"},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color, species AS facet FROM penguins'}
+
+# Multi-layer + SCALE applies the scheme to every layer that has the channel mapped.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point DRAW line SCALE color TO viridis
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}}}]}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins', layer_1='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins) ORDER BY x'}
+
+# SCALE without TO — clean error.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point SCALE color viridis
+----
+Expected 'TO'
+
+# SCALE TO without scheme name — clean error.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point SCALE color TO
+----
+Expected scheme name after 'SCALE <aesthetic> TO'

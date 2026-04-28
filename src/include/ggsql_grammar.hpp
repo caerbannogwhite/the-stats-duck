@@ -12,10 +12,16 @@ struct DrawLayer {
 	string mark;
 };
 
+struct ScaleSpec {
+	string aesthetic; // channel name to scale (color, fill, ...)
+	string scheme;    // Vega-Lite scheme name (accent, viridis, category10, ...)
+};
+
 struct VisualizeStatement {
 	vector<AestheticMapping> aesthetics;
 	string from_table;
 	vector<DrawLayer> layers;
+	vector<ScaleSpec> scales;
 };
 
 struct ParseResult {
