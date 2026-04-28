@@ -8,6 +8,8 @@
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 
+#include <map>
+
 namespace duckdb {
 namespace ggsql {
 
@@ -40,21 +42,91 @@ void MarkIntrospectionStub(DataChunk &args, ExpressionState &state, Vector &resu
 }
 
 //===--------------------------------------------------------------------===//
-// Built-in mark renderers (ported verbatim from phase 2 RenderMark).
+// Encoding helpers (Phase 4b).
+//===--------------------------------------------------------------------===//
+
+struct ChannelDefault {
+	const char *name;
+	const char *vega_type;
+};
+
+// Canonical encoding-channel order used for byte-stable output. New channels
+// can be appended without breaking existing fixtures.
+static const vector<ChannelDefault> kStandardChannels = {
+    {"x", "quantitative"},       {"y", "quantitative"},     {"color", "nominal"},
+    {"fill", "nominal"},         {"stroke", "nominal"},     {"shape", "nominal"},
+    {"size", "quantitative"},    {"opacity", "quantitative"}, {"tooltip", "nominal"},
+};
+
+bool HasAesthetic(const MarkContext &ctx, const string &channel) {
+	for (const auto &a : ctx.aesthetics) {
+		if (StringUtil::CIEquals(a.aesthetic, channel)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// Returns "" if the user did not map this aesthetic, otherwise:
+//   "<channel>":{"field":"<channel>","type":"<vega_type>"<extras>}
+// `extras` is appended verbatim (must already start with "," when non-empty).
+string BuildChannel(const MarkContext &ctx, const string &channel,
+                    const string &vega_type, const string &extras) {
+	if (!HasAesthetic(ctx, channel)) {
+		return "";
+	}
+	string out = "\"" + channel + "\":{\"field\":\"" + channel + "\",\"type\":\"" + vega_type + "\"";
+	out += extras;
+	out += "}";
+	return out;
+}
+
+// Builds a complete "{...}" encoding object from a channel-default table,
+// applying per-mark overrides for type and for inserted extras.
+string BuildEncoding(const MarkContext &ctx, const vector<ChannelDefault> &channel_table,
+                     const std::map<string, string> &type_overrides = {},
+                     const std::map<string, string> &extras_overrides = {}) {
+	string out = "{";
+	bool first = true;
+	for (const auto &ch : channel_table) {
+		string vega_type = ch.vega_type;
+		auto type_it = type_overrides.find(ch.name);
+		if (type_it != type_overrides.end()) {
+			vega_type = type_it->second;
+		}
+		string extras;
+		auto extras_it = extras_overrides.find(ch.name);
+		if (extras_it != extras_overrides.end()) {
+			extras = extras_it->second;
+		}
+		string fragment = BuildChannel(ctx, ch.name, vega_type, extras);
+		if (fragment.empty()) {
+			continue;
+		}
+		if (!first) {
+			out += ",";
+		}
+		out += fragment;
+		first = false;
+	}
+	out += "}";
+	return out;
+}
+
+//===--------------------------------------------------------------------===//
+// Built-in mark renderers.
 //===--------------------------------------------------------------------===//
 
 MarkResult RenderPoint(const MarkContext &ctx) {
 	MarkResult r;
-	r.layer_body =
-	    R"("mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}})";
+	r.layer_body = "\"mark\":\"point\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels);
 	r.data_sql = ctx.projected_sql;
 	return r;
 }
 
 MarkResult RenderLine(const MarkContext &ctx) {
 	MarkResult r;
-	r.layer_body =
-	    R"("mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}})";
+	r.layer_body = "\"mark\":\"line\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels);
 	r.data_sql = "SELECT * FROM (" + ctx.projected_sql + ") ORDER BY x";
 	return r;
 }
@@ -62,15 +134,30 @@ MarkResult RenderLine(const MarkContext &ctx) {
 MarkResult RenderBar(const MarkContext &ctx) {
 	MarkResult r;
 	r.layer_body =
-	    R"("mark":"bar","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"quantitative"}})";
+	    "\"mark\":\"bar\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels, {{"x", "ordinal"}});
 	r.data_sql = "SELECT x, SUM(y) AS y FROM (" + ctx.projected_sql + ") GROUP BY x ORDER BY x";
 	return r;
 }
 
 MarkResult RenderHistogram(const MarkContext &ctx) {
+	// Histogram's x is binned and y is computed (aggregate:count, no field).
+	// Optional channels (color, opacity, ...) come from kStandardChannels but x
+	// and y are spliced manually.
+	string encoding = "{\"x\":{\"field\":\"x\",\"type\":\"quantitative\",\"bin\":true},"
+	                  "\"y\":{\"aggregate\":\"count\",\"type\":\"quantitative\"}";
+	for (const auto &ch : kStandardChannels) {
+		string name = ch.name;
+		if (name == "x" || name == "y") {
+			continue;
+		}
+		string fragment = BuildChannel(ctx, name, ch.vega_type, "");
+		if (!fragment.empty()) {
+			encoding += "," + fragment;
+		}
+	}
+	encoding += "}";
 	MarkResult r;
-	r.layer_body =
-	    R"("mark":"bar","encoding":{"x":{"field":"x","type":"quantitative","bin":true},"y":{"aggregate":"count","type":"quantitative"}})";
+	r.layer_body = "\"mark\":\"bar\",\"encoding\":" + encoding;
 	r.data_sql = ctx.projected_sql;
 	return r;
 }

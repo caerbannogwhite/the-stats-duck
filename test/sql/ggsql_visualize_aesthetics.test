@@ -1,0 +1,51 @@
+# name: test/sql/ggsql_visualize_aesthetics.test
+# description: Phase 4b — additional aesthetic channels (color, fill, stroke, shape, size, opacity, tooltip)
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7, 'Adelie', 3.5), (39.5, 17.4, 'Adelie', 3.4), (44.0, 18.0, 'Gentoo', 5.5)) AS t(bill_len, bill_dep, species, mass);
+
+# Point with x/y/color — color defaults to nominal.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins'}
+
+# Point with all 9 standard channels — output order is canonical (x, y, color, fill, stroke, shape, size, opacity, tooltip).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color, species AS fill, species AS stroke, species AS shape, mass AS size, mass AS opacity, species AS tooltip FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"},"fill":{"field":"fill","type":"nominal"},"stroke":{"field":"stroke","type":"nominal"},"shape":{"field":"shape","type":"nominal"},"size":{"field":"size","type":"quantitative"},"opacity":{"field":"opacity","type":"quantitative"},"tooltip":{"field":"tooltip","type":"nominal"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color, species AS fill, species AS stroke, species AS shape, mass AS size, mass AS opacity, species AS tooltip FROM penguins'}
+
+# Bar inherits the ordinal-x override and accepts color.
+query TT
+VISUALIZE species AS x, mass AS y, species AS color FROM penguins DRAW bar
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"bar","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}	{layer_0='SELECT x, SUM(y) AS y FROM (SELECT species AS x, mass AS y, species AS color FROM penguins) GROUP BY x ORDER BY x'}
+
+# Line accepts color + size; data_sql still wraps with ORDER BY x.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color, mass AS size FROM penguins DRAW line
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"},"size":{"field":"size","type":"quantitative"}}}	{layer_0='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y, species AS color, mass AS size FROM penguins) ORDER BY x'}
+
+# Histogram keeps its computed bin-x and aggregate-count y; optional channels still apply.
+query TT
+VISUALIZE bill_len AS x, species AS color FROM penguins DRAW histogram
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"bar","encoding":{"x":{"field":"x","type":"quantitative","bin":true},"y":{"aggregate":"count","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}	{layer_0='SELECT bill_len AS x, species AS color FROM penguins'}
+
+# Histogram + user-mapped y is still silently dropped from encoding (count wins) but color is honoured.
+query TT
+VISUALIZE bill_len AS x, bill_len AS y, species AS color FROM penguins DRAW histogram
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"bar","encoding":{"x":{"field":"x","type":"quantitative","bin":true},"y":{"aggregate":"count","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}	{layer_0='SELECT bill_len AS x, bill_len AS y, species AS color FROM penguins'}
+
+# Multi-layer + extra aesthetics — color propagates to both layers.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point DRAW line
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}]}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins', layer_1='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins) ORDER BY x'}
