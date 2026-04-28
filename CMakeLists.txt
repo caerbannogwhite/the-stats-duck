@@ -135,3 +135,17 @@ install(
   EXPORT "${DUCKDB_EXPORT_SET}"
   LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
+
+# ── Phase 3 cross-extension WASM spike ──────────────────────────────────────
+# Builds a second loadable extension `marks_demo` that registers
+# `ggsql_mark_v1_demo`. Lets us verify cross-WASM-module mark dispatch (a
+# stats_duck.wasm session looking up + invoking a mark registered by
+# marks_demo.wasm). Throwaway — do not ship.
+if(BUILD_GGSQL_SPIKE OR EMSCRIPTEN)
+    set(MARKS_DEMO_NAME marks_demo)
+    set(MARKS_DEMO_SOURCES spike/marks_demo/marks_demo_extension.cpp)
+    if(EMSCRIPTEN)
+        set(DUCKDB_EXTENSION_MARKS_DEMO_LINKED_LIBS "-sWASM_BIGINT=0")
+    endif()
+    build_loadable_extension(${MARKS_DEMO_NAME} "-warnings" ${MARKS_DEMO_SOURCES})
+endif()
