@@ -44,3 +44,27 @@ statement error
 VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET species
 ----
 Expected 'BY'
+
+# Phase 9: explicit ROWS layout — vertical stack via Vega-Lite "facet":{"row":...}.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species ROWS
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"row":{"field":"facet","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet FROM penguins'}
+
+# Phase 9: explicit COLS layout — horizontal stack via "facet":{"column":...}.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species COLS
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"column":{"field":"facet","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet FROM penguins'}
+
+# Layout composes with SCALE — ROWS layout retained, scale injected into the matching channel.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point FACET BY species ROWS SCALE color TO viridis
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"row":{"field":"facet","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color, species AS facet FROM penguins'}
+
+# `ROWS` / `COLS` are reserved tokens after `FACET BY`. Bare `FACET BY ROWS` (no expression) errors.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY ROWS
+----
+Expected expression after 'FACET BY'

@@ -28,6 +28,7 @@ struct VisualizeStatement {
 	vector<DrawLayer> layers;
 	vector<ScaleSpec> scales;
 	vector<TypeOverride> type_overrides;
+	string facet_layout; // "" (grid), "rows", or "cols" — only meaningful when a facet aesthetic is present
 };
 
 struct ParseResult {

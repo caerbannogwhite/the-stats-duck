@@ -124,7 +124,17 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 	}
 	string projected_sql = BuildProjectedSql(stmt);
 	bool faceted = HasFacet(stmt);
-	const char *facet_block = "\"facet\":{\"field\":\"facet\",\"type\":\"nominal\"},\"spec\":";
+	string facet_block;
+	if (faceted) {
+		if (stmt.facet_layout == "rows") {
+			facet_block = "\"facet\":{\"row\":{\"field\":\"facet\",\"type\":\"nominal\"}},\"spec\":";
+		} else if (stmt.facet_layout == "cols") {
+			facet_block =
+			    "\"facet\":{\"column\":{\"field\":\"facet\",\"type\":\"nominal\"}},\"spec\":";
+		} else {
+			facet_block = "\"facet\":{\"field\":\"facet\",\"type\":\"nominal\"},\"spec\":";
+		}
+	}
 	CompiledResult out;
 
 	if (stmt.layers.size() == 1) {

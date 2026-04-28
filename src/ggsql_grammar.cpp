@@ -259,12 +259,14 @@ ParseResult ParseGgsql(const string &query) {
 		if (!consume("BY")) {
 			return result;
 		}
-		if (at_end() || IEqual(peek(), "SCALE")) {
+		if (at_end() || IEqual(peek(), "SCALE") || IEqual(peek(), "ROWS") ||
+		    IEqual(peek(), "COLS")) {
 			result.error = "Expected expression after 'FACET BY'";
 			return result;
 		}
 		string expr;
-		while (!at_end() && !IEqual(peek(), "SCALE")) {
+		while (!at_end() && !IEqual(peek(), "SCALE") && !IEqual(peek(), "ROWS") &&
+		       !IEqual(peek(), "COLS")) {
 			if (!expr.empty()) {
 				expr += " ";
 			}
@@ -274,6 +276,13 @@ ParseResult ParseGgsql(const string &query) {
 		facet.expression = std::move(expr);
 		facet.aesthetic = "facet";
 		result.stmt.aesthetics.push_back(std::move(facet));
+
+		// Optional layout: ROWS (vertical stack), COLS (horizontal stack), or
+		// nothing (grid — Vega-Lite default).
+		if (!at_end() && (IEqual(peek(), "ROWS") || IEqual(peek(), "COLS"))) {
+			result.stmt.facet_layout = StringUtil::Lower(tokens[i]);
+			i++;
+		}
 	}
 
 	// Optional `SCALE <aesthetic> TO <scheme>` clauses, zero or more.
