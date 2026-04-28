@@ -1,0 +1,60 @@
+# name: test/sql/ggsql_mark_registry.test
+# description: Phase 3 — built-in marks are registered through the ggsql_mark_v1_* catalog registry
+# group: [stats_duck]
+
+require stats_duck
+
+# Each built-in mark is a no-arg scalar function returning an introspection JSON.
+query T
+SELECT ggsql_mark_v1_point()
+----
+{"name":"point","required_aesthetics":["x","y"]}
+
+query T
+SELECT ggsql_mark_v1_line()
+----
+{"name":"line","required_aesthetics":["x","y"]}
+
+query T
+SELECT ggsql_mark_v1_bar()
+----
+{"name":"bar","required_aesthetics":["x","y"]}
+
+query T
+SELECT ggsql_mark_v1_histogram()
+----
+{"name":"histogram","required_aesthetics":["x"]}
+
+# All built-in marks are visible in the catalog under the v1 prefix.
+query T rowsort
+SELECT function_name FROM duckdb_functions()
+WHERE function_name LIKE 'ggsql_mark_v1_%'
+----
+ggsql_mark_v1_area
+ggsql_mark_v1_bar
+ggsql_mark_v1_boxplot
+ggsql_mark_v1_errorband
+ggsql_mark_v1_errorbar
+ggsql_mark_v1_histogram
+ggsql_mark_v1_line
+ggsql_mark_v1_point
+ggsql_mark_v1_rule
+ggsql_mark_v1_text
+ggsql_mark_v1_tick
+
+# Unknown mark — registry lookup fails cleanly.
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7), (39.5, 17.4)) AS t(bill_len, bill_dep);
+
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW kaplan_meier
+----
+unknown mark 'kaplan_meier'
+
+# Built-in dispatch through the registry produces byte-identical output to the
+# pre-registry implementation (regression check against the phase-2 fixtures).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}

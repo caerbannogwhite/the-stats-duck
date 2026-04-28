@@ -1,0 +1,57 @@
+# name: test/sql/ggsql_visualize_other_marks.test
+# description: Phase 7 — area, rule, tick marks
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7), (39.5, 17.4), (40.3, 18.0), (44.0, 18.0)) AS t(bill_len, bill_dep);
+
+# area: filled region under the curve, same x/y requirement and ORDER-BY-x
+# data SQL as line.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW area
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"area","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y FROM penguins) ORDER BY x'}
+
+# rule with x only renders a vertical reference line.
+query TT
+VISUALIZE 40 AS x FROM penguins DRAW rule
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"rule","encoding":{"x":{"field":"x","type":"quantitative"}}}	{layer_0=SELECT 40 AS x FROM penguins}
+
+# rule with y only renders a horizontal threshold line.
+query TT
+VISUALIZE 18 AS y FROM penguins DRAW rule
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"rule","encoding":{"y":{"field":"y","type":"quantitative"}}}	{layer_0=SELECT 18 AS y FROM penguins}
+
+# rule with both x and y renders a segment.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW rule
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"rule","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# tick with x only — useful for marginal rug plots.
+query TT
+VISUALIZE bill_len AS x FROM penguins DRAW tick
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"tick","encoding":{"x":{"field":"x","type":"quantitative"}}}	{layer_0=SELECT bill_len AS x FROM penguins}
+
+# Common pattern: scatter overlaid with a reference line.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW rule
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"rule","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}]}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins', layer_1='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Introspection: rule and tick declare empty required_aesthetics.
+query T
+SELECT ggsql_mark_v1_rule() AS info
+----
+{"name":"rule","required_aesthetics":[]}
+
+query T
+SELECT ggsql_mark_v1_tick() AS info
+----
+{"name":"tick","required_aesthetics":[]}

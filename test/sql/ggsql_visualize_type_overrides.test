@@ -1,0 +1,46 @@
+# name: test/sql/ggsql_visualize_type_overrides.test
+# description: Phase 8 — `<expr> AS <aesthetic>:<type>` overrides Vega-Lite's default channel type
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7, 'Adelie', 2018), (39.5, 17.4, 'Adelie', 2019), (44.0, 18.0, 'Gentoo', 2020)) AS t(bill_len, bill_dep, species, year);
+
+# Numeric column as ordinal (override the default nominal-for-color).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, year AS color:ordinal FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"ordinal"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, year AS color FROM penguins'}
+
+# String column forced to quantitative (Vega-Lite will likely reject at render but
+# the parser doesn't second-guess — the user knows their data).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color:quantitative FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins'}
+
+# Type override composes with SCALE (override applied first, then scale injection).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, year AS color:ordinal FROM penguins DRAW point SCALE color TO viridis
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"ordinal","scale":{"scheme":"viridis"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, year AS color FROM penguins'}
+
+# x and y can also be overridden — sometimes you want a categorical x on a point chart.
+query TT
+VISUALIZE bill_len AS x:nominal, bill_dep AS y FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"nominal"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Invalid type literal — clean error.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color:bogus FROM penguins DRAW point
+----
+Invalid aesthetic type 'bogus'
+
+# Empty aesthetic name before colon — clean error.
+statement error
+VISUALIZE bill_len AS :nominal FROM penguins DRAW point
+----
+Empty aesthetic name before ':'

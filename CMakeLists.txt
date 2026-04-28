@@ -73,6 +73,9 @@ set(EXTENSION_SOURCES
     src/chisq_function.cpp
     src/read_stat_function.cpp
     src/read_stat_types.cpp
+    src/ggsql.cpp
+    src/ggsql_grammar.cpp
+    src/ggsql_marks.cpp
     ${READSTAT_SOURCES})
 
 # ── Platform-specific iconv/zlib handling ────────────────────────────────────
@@ -108,6 +111,16 @@ if(Iconv_FOUND AND NOT WIN32)
 endif()
 
 set(PARAMETERS "-warnings")
+# Force i64 → (i32,i32) legalization at the WASM ABI boundary. Emscripten ≥ 4.0
+# defaults to -sWASM_BIGINT=1 (native i64), but @duckdb/duckdb-wasm 1.33.x and
+# the deployed phase-2 extension speak the legalized ABI. Mismatched modules
+# fail to link with a TemplatedValidityMask::Copy LinkError on instantiation.
+# Read by build_loadable_extension_directory at duckdb/extension/extension_build_tools.cmake:186
+# and spliced into the post-build emcc command.
+if(EMSCRIPTEN)
+    string(TOUPPER ${TARGET_NAME} _STATS_DUCK_UPPER)
+    set(DUCKDB_EXTENSION_${_STATS_DUCK_UPPER}_LINKED_LIBS "-sWASM_BIGINT=0")
+endif()
 build_loadable_extension(${TARGET_NAME} ${PARAMETERS} ${EXTENSION_SOURCES})
 if(ZLIB_FOUND)
     target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE HAVE_ZLIB)
@@ -122,3 +135,17 @@ install(
   EXPORT "${DUCKDB_EXPORT_SET}"
   LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
+
+# ── Phase 3 cross-extension WASM spike ──────────────────────────────────────
+# Builds a second loadable extension `marks_demo` that registers
+# `ggsql_mark_v1_demo`. Lets us verify cross-WASM-module mark dispatch (a
+# stats_duck.wasm session looking up + invoking a mark registered by
+# marks_demo.wasm). Throwaway — do not ship.
+if(BUILD_GGSQL_SPIKE OR EMSCRIPTEN)
+    set(MARKS_DEMO_NAME marks_demo)
+    set(MARKS_DEMO_SOURCES spike/marks_demo/marks_demo_extension.cpp)
+    if(EMSCRIPTEN)
+        set(DUCKDB_EXTENSION_MARKS_DEMO_LINKED_LIBS "-sWASM_BIGINT=0")
+    endif()
+    build_loadable_extension(${MARKS_DEMO_NAME} "-warnings" ${MARKS_DEMO_SOURCES})
+endif()
