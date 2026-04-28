@@ -30,11 +30,14 @@ query T rowsort
 SELECT function_name FROM duckdb_functions()
 WHERE function_name LIKE 'ggsql_mark_v1_%'
 ----
+ggsql_mark_v1_area
 ggsql_mark_v1_bar
 ggsql_mark_v1_histogram
 ggsql_mark_v1_line
 ggsql_mark_v1_point
+ggsql_mark_v1_rule
 ggsql_mark_v1_text
+ggsql_mark_v1_tick
 
 # Unknown mark — registry lookup fails cleanly.
 statement ok

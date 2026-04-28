@@ -152,6 +152,27 @@ MarkResult RenderText(const MarkContext &ctx) {
 	return r;
 }
 
+MarkResult RenderArea(const MarkContext &ctx) {
+	MarkResult r;
+	r.layer_body = "\"mark\":\"area\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels);
+	r.data_sql = "SELECT * FROM (" + ctx.projected_sql + ") ORDER BY x";
+	return r;
+}
+
+MarkResult RenderRule(const MarkContext &ctx) {
+	MarkResult r;
+	r.layer_body = "\"mark\":\"rule\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels);
+	r.data_sql = ctx.projected_sql;
+	return r;
+}
+
+MarkResult RenderTick(const MarkContext &ctx) {
+	MarkResult r;
+	r.layer_body = "\"mark\":\"tick\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels);
+	r.data_sql = ctx.projected_sql;
+	return r;
+}
+
 MarkResult RenderHistogram(const MarkContext &ctx) {
 	// Histogram's x is binned and y is computed (aggregate:count, no field).
 	// Optional channels (color, opacity, ...) come from kStandardChannels but x
@@ -221,6 +242,12 @@ void RegisterBuiltinMarks(ExtensionLoader &loader) {
 	RegisterMark(loader, "bar", {"x", "y"}, RenderBar);
 	RegisterMark(loader, "histogram", {"x"}, RenderHistogram);
 	RegisterMark(loader, "text", {"x", "y", "text"}, RenderText);
+	RegisterMark(loader, "area", {"x", "y"}, RenderArea);
+	// `rule` and `tick` accept any subset of x/y so a single mark serves the
+	// vline / hline / segment / rug-plot use cases. Vega-Lite renders sensibly
+	// with whatever the user maps; aesthetic validation stays minimal.
+	RegisterMark(loader, "rule", {}, RenderRule);
+	RegisterMark(loader, "tick", {}, RenderTick);
 }
 
 } // namespace ggsql
