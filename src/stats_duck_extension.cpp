@@ -12,6 +12,7 @@
 #include "chisq_function.hpp"
 #include "read_stat_function.hpp"
 #include "ggsql.hpp"
+#include "ggsql_marks_internal.hpp"
 
 #include "duckdb/main/extension/extension_loader.hpp"
 
@@ -40,6 +41,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// ggsql: Grammar of Graphics for SQL (parser extension + marks)
 	RegisterGgsql(loader);
+	ggsql::RegisterBuiltinMarks(loader);
 }
 
 void StatsDuckExtension::Load(ExtensionLoader &loader) {

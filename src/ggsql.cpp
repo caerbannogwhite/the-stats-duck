@@ -1,6 +1,7 @@
 #include "ggsql.hpp"
 
 #include "ggsql_grammar.hpp"
+#include "ggsql_marks_internal.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/insertion_order_preserving_map.hpp"
@@ -30,16 +31,7 @@ string BuildProjectedSql(const VisualizeStatement &stmt) {
 	return sql;
 }
 
-// Hardcoded mark table. Phase 3 will replace this with a proper registry so
-// external extensions (e.g., bio-stats) can plug in their own marks. Each
-// entry returns the Vega-Lite layer fragment (without $schema or data keys)
-// plus the SQL that computes that layer's data.
-struct MarkResult {
-	string layer_json_body; // the layer fragment keys AFTER the opening '{'
-	string data_sql;        // the SQL that produces this layer's data
-};
-
-bool HasAesthetic(const VisualizeStatement &stmt, const char *name) {
+bool HasAesthetic(const VisualizeStatement &stmt, const string &name) {
 	for (const auto &a : stmt.aesthetics) {
 		if (StringUtil::CIEquals(a.aesthetic, name)) {
 			return true;
@@ -48,59 +40,12 @@ bool HasAesthetic(const VisualizeStatement &stmt, const char *name) {
 	return false;
 }
 
-void RequireAesthetic(const VisualizeStatement &stmt, const string &mark, const char *aesthetic) {
-	if (!HasAesthetic(stmt, aesthetic)) {
-		throw InvalidInputException("ggsql: '%s' requires '%s' aesthetic", mark, aesthetic);
-	}
-}
-
-MarkResult RenderMark(const string &mark, const VisualizeStatement &stmt,
-                      const string &projected_sql) {
-	if (StringUtil::CIEquals(mark, "point")) {
-		RequireAesthetic(stmt, mark, "x");
-		RequireAesthetic(stmt, mark, "y");
-		MarkResult r;
-		r.layer_json_body =
-		    R"("mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}})";
-		r.data_sql = projected_sql;
-		return r;
-	}
-	if (StringUtil::CIEquals(mark, "line")) {
-		RequireAesthetic(stmt, mark, "x");
-		RequireAesthetic(stmt, mark, "y");
-		MarkResult r;
-		r.layer_json_body =
-		    R"("mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}})";
-		r.data_sql = "SELECT * FROM (" + projected_sql + ") ORDER BY x";
-		return r;
-	}
-	if (StringUtil::CIEquals(mark, "bar")) {
-		RequireAesthetic(stmt, mark, "x");
-		RequireAesthetic(stmt, mark, "y");
-		MarkResult r;
-		r.layer_json_body =
-		    R"("mark":"bar","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"quantitative"}})";
-		r.data_sql = "SELECT x, SUM(y) AS y FROM (" + projected_sql + ") GROUP BY x ORDER BY x";
-		return r;
-	}
-	if (StringUtil::CIEquals(mark, "histogram")) {
-		RequireAesthetic(stmt, mark, "x");
-		MarkResult r;
-		r.layer_json_body =
-		    R"("mark":"bar","encoding":{"x":{"field":"x","type":"quantitative","bin":true},"y":{"aggregate":"count","type":"quantitative"}})";
-		r.data_sql = projected_sql;
-		return r;
-	}
-	throw InvalidInputException(
-	    "ggsql: unknown mark '%s' (supported: point, line, bar, histogram)", mark);
-}
-
 struct CompiledResult {
 	string spec_json;
 	vector<pair<string, string>> layer_sqls;
 };
 
-CompiledResult Compile(const VisualizeStatement &stmt) {
+CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 	if (stmt.layers.size() != 1) {
 		throw InvalidInputException("ggsql phase 1 supports exactly one DRAW clause (got %llu)",
 		                            static_cast<unsigned long long>(stmt.layers.size()));
@@ -108,13 +53,21 @@ CompiledResult Compile(const VisualizeStatement &stmt) {
 	string projected_sql = BuildProjectedSql(stmt);
 	const auto &layer = stmt.layers[0];
 	string layer_name = "layer_0";
-	auto rendered = RenderMark(layer.mark, stmt, projected_sql);
+
+	const auto &info = LookupMark(context, layer.mark);
+	for (const auto &req : info.required_aesthetics) {
+		if (!HasAesthetic(stmt, req)) {
+			throw InvalidInputException("ggsql: '%s' requires '%s' aesthetic", layer.mark, req);
+		}
+	}
+	MarkContext ctx{stmt.aesthetics, projected_sql};
+	MarkResult rendered = info.render(ctx);
 
 	string spec =
 	    R"({"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":")";
 	spec += layer_name;
 	spec += R"("},)";
-	spec += rendered.layer_json_body;
+	spec += rendered.layer_body;
 	spec += "}";
 
 	CompiledResult out;
@@ -225,10 +178,10 @@ ParserExtensionParseResult GgsqlParse(ParserExtensionInfo *, const string &query
 	return ParserExtensionParseResult(make_uniq<GgsqlParseData>(std::move(parsed.stmt)));
 }
 
-ParserExtensionPlanResult GgsqlPlan(ParserExtensionInfo *, ClientContext &,
+ParserExtensionPlanResult GgsqlPlan(ParserExtensionInfo *, ClientContext &context,
                                     unique_ptr<ParserExtensionParseData> parse_data) {
 	auto &data = (GgsqlParseData &)*parse_data;
-	auto compiled = Compile(data.stmt);
+	auto compiled = Compile(context, data.stmt);
 
 	TableFunction tf;
 	tf.name = "ggsql_result";

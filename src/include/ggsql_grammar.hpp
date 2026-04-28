@@ -3,14 +3,10 @@
 #include "duckdb/common/common.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/vector.hpp"
+#include "ggsql_marks.hpp"
 
 namespace duckdb {
 namespace ggsql {
-
-struct AestheticMapping {
-	string expression;
-	string aesthetic;
-};
 
 struct DrawLayer {
 	string mark;
