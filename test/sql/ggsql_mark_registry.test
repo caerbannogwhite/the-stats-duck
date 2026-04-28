@@ -25,7 +25,7 @@ SELECT ggsql_mark_v1_histogram()
 ----
 {"name":"histogram","required_aesthetics":["x"]}
 
-# All four marks are visible in the catalog under the v1 prefix.
+# All built-in marks are visible in the catalog under the v1 prefix.
 query T rowsort
 SELECT function_name FROM duckdb_functions()
 WHERE function_name LIKE 'ggsql_mark_v1_%'
@@ -34,6 +34,7 @@ ggsql_mark_v1_bar
 ggsql_mark_v1_histogram
 ggsql_mark_v1_line
 ggsql_mark_v1_point
+ggsql_mark_v1_text
 
 # Unknown mark — registry lookup fails cleanly.
 statement ok

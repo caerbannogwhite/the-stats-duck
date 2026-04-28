@@ -1,0 +1,39 @@
+# name: test/sql/ggsql_visualize_text.test
+# description: Phase 6a — text mark renders labels at (x,y); requires the text aesthetic
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE labels AS
+SELECT * FROM (VALUES (1.0, 2.0, 'A'), (3.0, 4.0, 'B')) AS t(x, y, label);
+
+# Required aesthetics: x, y, text.
+query TT
+VISUALIZE x AS x, y AS y, label AS text FROM labels DRAW text
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"text","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"text":{"field":"text","type":"nominal"}}}	{layer_0='SELECT x AS x, y AS y, label AS text FROM labels'}
+
+# Missing text aesthetic surfaces the standard required-aesthetic error.
+statement error
+VISUALIZE x AS x, y AS y FROM labels DRAW text
+----
+'text' requires 'text' aesthetic
+
+# Introspection lists all three required aesthetics.
+query T
+SELECT ggsql_mark_v1_text() AS info
+----
+{"name":"text","required_aesthetics":["x","y","text"]}
+
+# Other marks accept text as an optional channel — useful for tooltipping points.
+query TT
+VISUALIZE x AS x, y AS y, label AS text FROM labels DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"text":{"field":"text","type":"nominal"}}}	{layer_0='SELECT x AS x, y AS y, label AS text FROM labels'}
+
+# Common pattern: scatter with text labels overlaid as a second layer.
+query TT
+VISUALIZE x AS x, y AS y, label AS text FROM labels DRAW point DRAW text
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"text":{"field":"text","type":"nominal"}}},{"data":{"name":"layer_1"},"mark":"text","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"text":{"field":"text","type":"nominal"}}}]}	{layer_0='SELECT x AS x, y AS y, label AS text FROM labels', layer_1='SELECT x AS x, y AS y, label AS text FROM labels'}

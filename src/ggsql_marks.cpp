@@ -51,11 +51,12 @@ struct ChannelDefault {
 };
 
 // Canonical encoding-channel order used for byte-stable output. New channels
-// can be appended without breaking existing fixtures.
+// must be appended (not inserted) to keep fixtures stable.
 static const vector<ChannelDefault> kStandardChannels = {
     {"x", "quantitative"},       {"y", "quantitative"},     {"color", "nominal"},
     {"fill", "nominal"},         {"stroke", "nominal"},     {"shape", "nominal"},
     {"size", "quantitative"},    {"opacity", "quantitative"}, {"tooltip", "nominal"},
+    {"text", "nominal"},
 };
 
 bool HasAesthetic(const MarkContext &ctx, const string &channel) {
@@ -139,6 +140,13 @@ MarkResult RenderBar(const MarkContext &ctx) {
 	return r;
 }
 
+MarkResult RenderText(const MarkContext &ctx) {
+	MarkResult r;
+	r.layer_body = "\"mark\":\"text\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels);
+	r.data_sql = ctx.projected_sql;
+	return r;
+}
+
 MarkResult RenderHistogram(const MarkContext &ctx) {
 	// Histogram's x is binned and y is computed (aggregate:count, no field).
 	// Optional channels (color, opacity, ...) come from kStandardChannels but x
@@ -207,6 +215,7 @@ void RegisterBuiltinMarks(ExtensionLoader &loader) {
 	RegisterMark(loader, "line", {"x", "y"}, RenderLine);
 	RegisterMark(loader, "bar", {"x", "y"}, RenderBar);
 	RegisterMark(loader, "histogram", {"x"}, RenderHistogram);
+	RegisterMark(loader, "text", {"x", "y", "text"}, RenderText);
 }
 
 } // namespace ggsql
