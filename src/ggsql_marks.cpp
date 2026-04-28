@@ -133,10 +133,15 @@ MarkResult RenderLine(const MarkContext &ctx) {
 }
 
 MarkResult RenderBar(const MarkContext &ctx) {
+	// When faceting is active, the `facet` column rides through projected_sql
+	// and must be carried through bar's GROUP BY so each facet partition keeps
+	// its own ordinal x bins.
+	string group_by = HasAesthetic(ctx, "facet") ? string("x, facet") : string("x");
 	MarkResult r;
 	r.layer_body =
 	    "\"mark\":\"bar\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels, {{"x", "ordinal"}});
-	r.data_sql = "SELECT x, SUM(y) AS y FROM (" + ctx.projected_sql + ") GROUP BY x ORDER BY x";
+	r.data_sql = "SELECT " + group_by + ", SUM(y) AS y FROM (" + ctx.projected_sql + ") GROUP BY " +
+	             group_by + " ORDER BY x";
 	return r;
 }
 

@@ -57,16 +57,28 @@ MarkResult RenderLayer(ClientContext &context, const VisualizeStatement &stmt,
 	return info.render(ctx);
 }
 
+bool HasFacet(const VisualizeStatement &stmt) {
+	for (const auto &a : stmt.aesthetics) {
+		if (StringUtil::CIEquals(a.aesthetic, "facet")) {
+			return true;
+		}
+	}
+	return false;
+}
+
 CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 	if (stmt.layers.empty()) {
 		throw InvalidInputException("ggsql: at least one DRAW clause is required");
 	}
 	string projected_sql = BuildProjectedSql(stmt);
+	bool faceted = HasFacet(stmt);
+	const char *facet_block = "\"facet\":{\"field\":\"facet\",\"type\":\"nominal\"},\"spec\":";
 	CompiledResult out;
 
 	if (stmt.layers.size() == 1) {
 		// Single layer: emit canonical Vega-Lite single-view shape (top-level
-		// data + mark + encoding). Byte-identical to phase 3.
+		// data + mark + encoding). When faceted, wrap mark/encoding inside a
+		// `spec` sibling of `facet`.
 		const string layer_name = "layer_0";
 		MarkResult rendered = RenderLayer(context, stmt, stmt.layers[0], projected_sql);
 
@@ -74,7 +86,14 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 		    R"({"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":")";
 		spec += layer_name;
 		spec += R"("},)";
-		spec += rendered.layer_body;
+		if (faceted) {
+			spec += facet_block;
+			spec += "{";
+			spec += rendered.layer_body;
+			spec += "}";
+		} else {
+			spec += rendered.layer_body;
+		}
 		spec += "}";
 
 		out.spec_json = std::move(spec);
@@ -82,24 +101,34 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 		return out;
 	}
 
-	// Multi-layer: emit Vega-Lite layer:[...] array. Each layer gets its own
-	// data:{name:"layer_<i>"} binding because layers can have different data_sql
-	// (e.g., point uses raw projected_sql, line wraps with ORDER BY x).
-	string spec = R"({"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[)";
+	// Multi-layer: emit Vega-Lite layer:[...] array. When faceted, wrap the
+	// layer array in a `spec` sibling of `facet`.
+	string layer_array = R"("layer":[)";
 	for (size_t i = 0; i < stmt.layers.size(); i++) {
 		if (i > 0) {
-			spec += ",";
+			layer_array += ",";
 		}
 		string layer_name = "layer_" + std::to_string(i);
 		MarkResult rendered = RenderLayer(context, stmt, stmt.layers[i], projected_sql);
-		spec += R"({"data":{"name":")";
-		spec += layer_name;
-		spec += R"("},)";
-		spec += rendered.layer_body;
-		spec += "}";
+		layer_array += R"({"data":{"name":")";
+		layer_array += layer_name;
+		layer_array += R"("},)";
+		layer_array += rendered.layer_body;
+		layer_array += "}";
 		out.layer_sqls.emplace_back(layer_name, std::move(rendered.data_sql));
 	}
-	spec += "]}";
+	layer_array += "]";
+
+	string spec = R"({"$schema":"https://vega.github.io/schema/vega-lite/v5.json",)";
+	if (faceted) {
+		spec += facet_block;
+		spec += "{";
+		spec += layer_array;
+		spec += "}";
+	} else {
+		spec += layer_array;
+	}
+	spec += "}";
 	out.spec_json = std::move(spec);
 	return out;
 }

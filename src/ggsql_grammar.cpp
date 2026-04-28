@@ -207,7 +207,7 @@ ParseResult ParseGgsql(const string &query) {
 	}
 	result.stmt.from_table = tokens[i++];
 
-	while (!at_end()) {
+	while (!at_end() && !IEqual(peek(), "FACET")) {
 		if (!consume("DRAW")) {
 			return result;
 		}
@@ -223,6 +223,31 @@ ParseResult ParseGgsql(const string &query) {
 	if (result.stmt.layers.empty()) {
 		result.error = "At least one 'DRAW <mark>' clause is required";
 		return result;
+	}
+
+	// Optional `FACET BY <expr>`. Stored as a synthetic aesthetic named "facet";
+	// "facet" is reserved — Compile() detects it to wrap the spec in a Vega-Lite
+	// facet operator and BuildProjectedSql carries it through.
+	if (!at_end() && IEqual(peek(), "FACET")) {
+		i++; // consume FACET (case-insensitive — already verified)
+		if (!consume("BY")) {
+			return result;
+		}
+		if (at_end()) {
+			result.error = "Expected expression after 'FACET BY'";
+			return result;
+		}
+		string expr;
+		while (!at_end()) {
+			if (!expr.empty()) {
+				expr += " ";
+			}
+			expr += tokens[i++];
+		}
+		AestheticMapping facet;
+		facet.expression = std::move(expr);
+		facet.aesthetic = "facet";
+		result.stmt.aesthetics.push_back(std::move(facet));
 	}
 
 	result.success = true;
