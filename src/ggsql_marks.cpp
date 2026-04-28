@@ -56,7 +56,7 @@ static const vector<ChannelDefault> kStandardChannels = {
     {"x", "quantitative"},       {"y", "quantitative"},     {"color", "nominal"},
     {"fill", "nominal"},         {"stroke", "nominal"},     {"shape", "nominal"},
     {"size", "quantitative"},    {"opacity", "quantitative"}, {"tooltip", "nominal"},
-    {"text", "nominal"},
+    {"text", "nominal"},         {"x2", "quantitative"},    {"y2", "quantitative"},
 };
 
 bool HasAesthetic(const MarkContext &ctx, const string &channel) {
@@ -173,6 +173,27 @@ MarkResult RenderTick(const MarkContext &ctx) {
 	return r;
 }
 
+MarkResult RenderErrorbar(const MarkContext &ctx) {
+	MarkResult r;
+	r.layer_body = "\"mark\":\"errorbar\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels);
+	r.data_sql = ctx.projected_sql;
+	return r;
+}
+
+MarkResult RenderErrorband(const MarkContext &ctx) {
+	MarkResult r;
+	r.layer_body = "\"mark\":\"errorband\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels);
+	r.data_sql = "SELECT * FROM (" + ctx.projected_sql + ") ORDER BY x";
+	return r;
+}
+
+MarkResult RenderBoxplot(const MarkContext &ctx) {
+	MarkResult r;
+	r.layer_body = "\"mark\":\"boxplot\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels);
+	r.data_sql = ctx.projected_sql;
+	return r;
+}
+
 MarkResult RenderHistogram(const MarkContext &ctx) {
 	// Histogram's x is binned and y is computed (aggregate:count, no field).
 	// Optional channels (color, opacity, ...) come from kStandardChannels but x
@@ -248,6 +269,12 @@ void RegisterBuiltinMarks(ExtensionLoader &loader) {
 	// with whatever the user maps; aesthetic validation stays minimal.
 	RegisterMark(loader, "rule", {}, RenderRule);
 	RegisterMark(loader, "tick", {}, RenderTick);
+	// Stats marks: errorbar/errorband consume the y2 channel for the upper
+	// bound; boxplot's quartile/outlier computation is server-side via
+	// Vega-Lite once x and y are mapped.
+	RegisterMark(loader, "errorbar", {"x", "y"}, RenderErrorbar);
+	RegisterMark(loader, "errorband", {"x", "y"}, RenderErrorband);
+	RegisterMark(loader, "boxplot", {"x", "y"}, RenderBoxplot);
 }
 
 } // namespace ggsql

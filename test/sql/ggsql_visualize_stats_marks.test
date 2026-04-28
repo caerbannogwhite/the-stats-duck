@@ -1,0 +1,44 @@
+# name: test/sql/ggsql_visualize_stats_marks.test
+# description: Phase 10 — errorbar / errorband / boxplot for uncertainty + distribution
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE measurements AS
+SELECT * FROM (VALUES (1.0, 5.0, 4.0, 6.0), (2.0, 6.0, 5.5, 6.5), (3.0, 7.0, 6.0, 8.0)) AS t(group_id, mean, lo, hi);
+
+# errorbar: pre-aggregated lower/upper via y/y2.
+query TT
+VISUALIZE group_id AS x, lo AS y, hi AS y2 FROM measurements DRAW errorbar
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"errorbar","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"y2":{"field":"y2","type":"quantitative"}}}	{layer_0='SELECT group_id AS x, lo AS y, hi AS y2 FROM measurements'}
+
+# errorband: same range encoding as errorbar but draws a filled region; data
+# SQL orders by x like line/area for clean filling.
+query TT
+VISUALIZE group_id AS x, lo AS y, hi AS y2 FROM measurements DRAW errorband
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"errorband","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"y2":{"field":"y2","type":"quantitative"}}}	{layer_0='SELECT * FROM (SELECT group_id AS x, lo AS y, hi AS y2 FROM measurements) ORDER BY x'}
+
+# boxplot: x and y suffice — Vega-Lite computes quartiles + outliers.
+query TT
+VISUALIZE group_id AS x, mean AS y FROM measurements DRAW boxplot
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"boxplot","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT group_id AS x, mean AS y FROM measurements'}
+
+# Introspection: required_aesthetics = [x, y] for all three.
+query T
+SELECT ggsql_mark_v1_errorbar() AS info
+----
+{"name":"errorbar","required_aesthetics":["x","y"]}
+
+query T
+SELECT ggsql_mark_v1_errorband() AS info
+----
+{"name":"errorband","required_aesthetics":["x","y"]}
+
+query T
+SELECT ggsql_mark_v1_boxplot() AS info
+----
+{"name":"boxplot","required_aesthetics":["x","y"]}
