@@ -1,0 +1,53 @@
+# name: test/sql/ggsql_visualize_expressions.test
+# description: Phase 4c — multi-token SQL expressions in aesthetic mappings
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7, 'Adelie'), (39.5, 17.4, 'Adelie'), (44.0, 18.0, 'Gentoo')) AS t(bill_len, bill_dep, species);
+
+# Arithmetic expressions on both sides of the mapping list.
+query TT
+VISUALIZE bill_len * 2 AS x, bill_dep + 1 AS y FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len * 2 AS x, bill_dep + 1 AS y FROM penguins'}
+
+# Function call without inline commas works (parens preserved as separate tokens, joined with spaces).
+query TT
+VISUALIZE bill_len AS x, log(bill_dep) AS y FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, log(bill_dep) AS y FROM penguins'}
+
+# Boolean expression maps to the color aesthetic.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, bill_len > 40 AS color FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, bill_len > 40 AS color FROM penguins'}
+
+# Expression mixed with multi-layer (4a × 4c interaction).
+query TT
+VISUALIZE bill_len + bill_dep AS x, bill_dep AS y FROM penguins DRAW point DRAW line
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}]}	{layer_0='SELECT bill_len + bill_dep AS x, bill_dep AS y FROM penguins', layer_1='SELECT * FROM (SELECT bill_len + bill_dep AS x, bill_dep AS y FROM penguins) ORDER BY x'}
+
+# Empty expression before AS — clean error.
+statement error
+VISUALIZE AS x FROM penguins DRAW point
+----
+Empty expression before 'AS'
+
+# Documented limitation: top-level commas inside expressions break the boundary
+# scan. `coalesce(bill_len, bill_dep)` would parse as two separate mappings; the
+# error surfaces from the first mapping (which is missing AS).
+statement error
+VISUALIZE coalesce(bill_len, bill_dep) AS x, bill_dep AS y FROM penguins DRAW point
+----
+Expected 'AS' before aesthetic 'coalesce(bill_len'
+
+# Trailing AS without aesthetic — clean error.
+statement error
+VISUALIZE bill_len AS FROM penguins DRAW point
+----
+Expected aesthetic name after 'AS'

@@ -64,27 +64,72 @@ ParseResult ParseGgsql(const string &query) {
 		return result;
 	}
 
-	// mapping_list := <ident> AS <ident> (',' <ident> AS <ident>)*
+	// mapping_list := <expr> AS <ident> (',' <expr> AS <ident>)*
+	//
+	// <expr> may span multiple tokens (e.g. `bill_len * 2`, `log(bill_dep)`).
+	// Boundary scan: each mapping consumes tokens until the next top-level `,`,
+	// `FROM`, or `DRAW`. The last token in that range is the aesthetic name; the
+	// token immediately preceding it must be `AS`; everything earlier is the
+	// expression text (concatenated with single spaces — whitespace inside
+	// parens is preserved by DuckDB's downstream parser).
+	//
+	// Limitations (deferred to a paren-aware tokenizer in a later phase):
+	//   - top-level commas inside expressions break the scan (`coalesce(a, b)`)
+	//   - `FROM` / `DRAW` keywords inside subqueries break the scan
+	//   - quoted identifiers `"my col"` are not supported
 	while (true) {
-		if (at_end()) {
-			result.error = "Expected expression after VISUALIZE";
-			return result;
+		// Scan forward to the next mapping boundary at depth 0.
+		size_t boundary = i;
+		while (boundary < tokens.size()) {
+			const string &t = tokens[boundary];
+			if (t == "," || IEqual(t, "FROM") || IEqual(t, "DRAW")) {
+				break;
+			}
+			boundary++;
 		}
-		if (IEqual(peek(), "FROM") || IEqual(peek(), "DRAW") || peek() == ",") {
+
+		if (boundary == i) {
 			result.error = "Expected expression after VISUALIZE (or ',')";
 			return result;
 		}
-		AestheticMapping mapping;
-		mapping.expression = tokens[i++];
-		if (!consume("AS")) {
-			return result;
-		}
-		if (at_end()) {
+
+		// `… AS` with nothing after the AS.
+		if (IEqual(tokens[boundary - 1], "AS")) {
 			result.error = "Expected aesthetic name after 'AS'";
 			return result;
 		}
-		mapping.aesthetic = tokens[i++];
+
+		// Need at least 3 tokens: <something> AS <aesth>. With 2 we either have
+		// no AS at all, or a leading AS with empty expression.
+		if (boundary - i < 3) {
+			if (boundary - i == 2 && IEqual(tokens[i], "AS")) {
+				result.error = "Empty expression before 'AS'";
+			} else {
+				result.error = "Expected 'AS' before aesthetic '" + tokens[boundary - 1] + "'";
+			}
+			return result;
+		}
+
+		size_t aesth_idx = boundary - 1;
+		size_t as_idx = boundary - 2;
+		if (!IEqual(tokens[as_idx], "AS")) {
+			result.error = "Expected 'AS' before aesthetic '" + tokens[aesth_idx] + "'";
+			return result;
+		}
+
+		string expr;
+		for (size_t k = i; k < as_idx; k++) {
+			if (!expr.empty()) {
+				expr += " ";
+			}
+			expr += tokens[k];
+		}
+
+		AestheticMapping mapping;
+		mapping.expression = std::move(expr);
+		mapping.aesthetic = tokens[aesth_idx];
 		result.stmt.aesthetics.push_back(std::move(mapping));
+		i = boundary;
 
 		if (!at_end() && peek() == ",") {
 			i++;
