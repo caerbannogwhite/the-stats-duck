@@ -1,0 +1,177 @@
+# name: test/sql/sas_export_xpt.test
+# description: COPY ... TO '*.xpt' — XPT v5 round-trip export via ReadStat
+# group: [stats_duck]
+
+require stats_duck
+
+# ─── Numeric round-trip ────────────────────────────────────────────────────────
+# XPT only stores 8-byte IBM-360 floats, so INTEGER → DOUBLE on round-trip.
+
+statement ok
+CREATE TABLE nums AS SELECT * FROM (VALUES (1, 1.5, 100), (2, 2.5, 200), (3, 3.5, 300)) AS t(I, X, Y);
+
+statement ok
+COPY nums TO '__TEST_DIR__/nums.xpt';
+
+query III
+SELECT CAST(I AS INTEGER), CAST(X * 10 AS INTEGER), CAST(Y AS INTEGER)
+FROM read_stat('__TEST_DIR__/nums.xpt') ORDER BY I
+----
+1	15	100
+2	25	200
+3	35	300
+
+# ─── Strings ───────────────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE strs AS SELECT * FROM (VALUES ('alice', 1), ('bob', 2), ('charlie', 3)) AS t(NAME, ID);
+
+statement ok
+COPY strs TO '__TEST_DIR__/strs.xpt';
+
+query TI
+SELECT NAME, CAST(ID AS INTEGER) FROM read_stat('__TEST_DIR__/strs.xpt') ORDER BY ID
+----
+alice	1
+bob	2
+charlie	3
+
+# ─── NULLs in numeric column round-trip as NULL ───────────────────────────────
+# Note: SAS XPT character columns cannot distinguish NULL from empty string —
+# both round-trip as empty string. This is a SAS format limitation, not a bug.
+
+statement ok
+CREATE TABLE nulls AS SELECT * FROM (VALUES (1, 'a'), (2, 'b'), (NULL, 'c')) AS t(N, S);
+
+statement ok
+COPY nulls TO '__TEST_DIR__/nulls.xpt';
+
+query IT
+SELECT CAST(N AS INTEGER), S FROM read_stat('__TEST_DIR__/nulls.xpt') ORDER BY N NULLS LAST
+----
+1	a
+2	b
+NULL	c
+
+# Empty string → empty string (no NULL distinction in SAS character columns).
+statement ok
+CREATE TABLE estr AS SELECT * FROM (VALUES (1, 'x'), (2, ''), (3, NULL)) AS t(N, S);
+
+statement ok
+COPY estr TO '__TEST_DIR__/estr.xpt';
+
+query IT
+SELECT CAST(N AS INTEGER), S FROM read_stat('__TEST_DIR__/estr.xpt') ORDER BY N
+----
+1	x
+2	(empty)
+3	(empty)
+
+# ─── Dates / timestamps / times round-trip via SAS epoch ──────────────────────
+
+statement ok
+CREATE TABLE temporals AS SELECT * FROM (VALUES
+    (DATE '2024-01-15', TIMESTAMP '2024-01-15 10:30:45', TIME '10:30:45'),
+    (DATE '1980-06-30', TIMESTAMP '1980-06-30 23:59:59', TIME '23:59:59'),
+    (DATE '1960-01-01', TIMESTAMP '1960-01-01 00:00:00', TIME '00:00:00')
+) AS t(D, TS, TM);
+
+statement ok
+COPY temporals TO '__TEST_DIR__/temporals.xpt';
+
+query TTT
+SELECT D, TS, TM FROM read_stat('__TEST_DIR__/temporals.xpt') ORDER BY D
+----
+1960-01-01	1960-01-01 00:00:00	00:00:00
+1980-06-30	1980-06-30 23:59:59	23:59:59
+2024-01-15	2024-01-15 10:30:45	10:30:45
+
+# ─── COPY (subquery) form, not just COPY <table> ──────────────────────────────
+
+statement ok
+COPY (SELECT 42 AS I, 'hi' AS S) TO '__TEST_DIR__/inline.xpt';
+
+query IT
+SELECT CAST(I AS INTEGER), S FROM read_stat('__TEST_DIR__/inline.xpt')
+----
+42	hi
+
+# ─── Wide string column — storage_width is computed from observed max length ──
+
+statement ok
+CREATE TABLE wide AS SELECT * FROM (VALUES ('short'), ('a much longer value here'), ('mid')) AS t(S);
+
+statement ok
+COPY wide TO '__TEST_DIR__/wide.xpt';
+
+query T
+SELECT S FROM read_stat('__TEST_DIR__/wide.xpt') ORDER BY S
+----
+a much longer value here
+mid
+short
+
+# ─── Empty table ───────────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE empty(I INTEGER, S VARCHAR);
+
+statement ok
+COPY empty TO '__TEST_DIR__/empty.xpt';
+
+query I
+SELECT COUNT(*) FROM read_stat('__TEST_DIR__/empty.xpt')
+----
+0
+
+# ─── FORMAT option overrides extension inference ───────────────────────────────
+
+statement ok
+COPY (SELECT 7 AS X) TO '__TEST_DIR__/explicit.dat' (FORMAT 'xpt');
+
+query I
+SELECT CAST(X AS INTEGER) FROM read_stat('__TEST_DIR__/explicit.dat', format := 'xpt')
+----
+7
+
+# ─── XPT-specific OPTIONS ──────────────────────────────────────────────────────
+
+statement ok
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/labeled.xpt' (LABEL 'My dataset', TABLE_NAME 'MYTAB');
+
+query I
+SELECT CAST(X AS INTEGER) FROM read_stat('__TEST_DIR__/labeled.xpt')
+----
+1
+
+# ─── Negative cases ────────────────────────────────────────────────────────────
+
+# Column name longer than 8 chars — XPT v5 limit.
+statement error
+COPY (SELECT 1 AS column_name_too_long) TO '__TEST_DIR__/bad.xpt'
+----
+too long for XPT v5
+
+# Column name with a dash (non-alphanumeric) is rejected.
+statement error
+COPY (SELECT 1 AS "bad-name") TO '__TEST_DIR__/bad.xpt'
+----
+characters not allowed in XPT v5
+
+# Unsupported type (LIST) is rejected at bind.
+statement error
+COPY (SELECT [1, 2, 3] AS X) TO '__TEST_DIR__/bad.xpt'
+----
+unsupported type
+
+# Unknown OPTION is rejected.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.xpt' (UNKNOWN_OPT 'foo')
+----
+Unrecognized XPT option
+
+# TABLE_NAME that doesn't fit XPT v5 rules is rejected when user-specified.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.xpt' (TABLE_NAME 'this_is_too_long')
+----
+too long for XPT v5

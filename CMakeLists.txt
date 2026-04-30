@@ -73,6 +73,7 @@ set(EXTENSION_SOURCES
     src/chisq_function.cpp
     src/read_stat_function.cpp
     src/read_stat_types.cpp
+    src/sas_export_function.cpp
     src/ggsql.cpp
     src/ggsql_grammar.cpp
     src/ggsql_marks.cpp

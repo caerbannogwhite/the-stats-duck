@@ -10,6 +10,19 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+### Added
+
+- `COPY tbl TO 'file.xpt'` — write SAS Transport (XPT v5) files via ReadStat.
+  Supports BOOLEAN, all integer/float/decimal types, VARCHAR, DATE, TIMESTAMP, and
+  TIME columns. Numeric NULLs round-trip as SAS system-missing; VARCHAR NULLs
+  collapse to empty strings (SAS character columns have no NULL/empty distinction).
+  Output goes through DuckDB's `FileSystem` so registered/remote/WASM paths work
+  the same as `read_stat()`. Optional `LABEL` and `TABLE_NAME` options. XPT v5
+  column-name rules (≤ 8 chars uppercase, A-Z 0-9 _) are validated at bind — no
+  silent truncation. Buffers the full result set in a `ColumnDataCollection`
+  (spillable via DuckDB's buffer manager) before emitting, since ReadStat's writer
+  requires the row count up front.
+
 ### Changed
 
 - Target DuckDB v1.5.1 (up from v1.2.2). Extensions built for 0.1.x are
