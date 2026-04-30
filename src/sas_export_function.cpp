@@ -21,32 +21,38 @@ extern "C" {
 
 namespace duckdb {
 
-// ─── XPT v5 column-name validation ─────────────────────────────────────────────
-// XPT v5 requires names ≤ 8 chars, ASCII alphanumeric or underscore, must start
-// with a letter or underscore. We uppercase and reject — silent truncation
-// would create silent collisions on round-trip.
+enum class SasFormat { XPT, SAS7BDAT };
 
-static string ValidateXportV5Name(const string &name, const char *role) {
+// ─── Per-format column-name validation ─────────────────────────────────────────
+// XPT v5: ≤ 8 chars, uppercased, ASCII alphanumeric or underscore, must start
+// with a letter or underscore. Names are uppercased before validation —
+// silent truncation would create silent collisions on round-trip.
+// SAS7BDAT: ≤ 32 chars, otherwise the same character rules. Case is preserved
+// (real SAS is case-insensitive but stores the user's casing).
+
+static string ValidateColumnName(const string &name, SasFormat format, const char *role) {
+	const size_t max_len = (format == SasFormat::XPT) ? 8 : 32;
+	const char *format_label = (format == SasFormat::XPT) ? "XPT v5" : "SAS7BDAT";
+
 	if (name.empty()) {
-		throw BinderException("Empty %s not allowed in XPT export", role);
+		throw BinderException("Empty %s not allowed in %s export", role, format_label);
 	}
-	if (name.size() > 8) {
-		throw BinderException(
-		    "%s '%s' is too long for XPT v5 (max 8 chars). Rename in your SELECT or wait for XPT v8 support.",
-		    role, name);
+	if (name.size() > max_len) {
+		throw BinderException("%s '%s' is too long for %s (max %llu chars). Rename in your SELECT.", role, name,
+		                      format_label, static_cast<uint64_t>(max_len));
 	}
-	string upper = StringUtil::Upper(name);
-	for (char c : upper) {
-		bool ok = (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+	string out = (format == SasFormat::XPT) ? StringUtil::Upper(name) : name;
+	for (char c : out) {
+		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
 		if (!ok) {
-			throw BinderException("%s '%s' contains characters not allowed in XPT v5 (only A-Z 0-9 _ permitted)",
-			                      role, name);
+			throw BinderException("%s '%s' contains characters not allowed in %s (only A-Z a-z 0-9 _ permitted)",
+			                      role, name, format_label);
 		}
 	}
-	if (upper[0] >= '0' && upper[0] <= '9') {
-		throw BinderException("%s '%s' starts with a digit, not allowed in XPT v5", role, name);
+	if (out[0] >= '0' && out[0] <= '9') {
+		throw BinderException("%s '%s' starts with a digit, not allowed in %s", role, name, format_label);
 	}
-	return upper;
+	return out;
 }
 
 // ─── Type mapping (DuckDB → ReadStat) ──────────────────────────────────────────
@@ -114,14 +120,18 @@ static void MapDuckDBType(const LogicalType &dt, ColumnSpec &spec) {
 // ─── BindData / GlobalState / LocalState ───────────────────────────────────────
 
 struct SasExportBindData : public FunctionData {
+	SasFormat format = SasFormat::XPT;
 	string label;
-	string table_name;
+	string table_name;                                          // XPT only
+	readstat_compress_t compression = READSTAT_COMPRESS_NONE;   // SAS7BDAT only
 	vector<ColumnSpec> columns;
 
 	unique_ptr<FunctionData> Copy() const override {
 		auto c = make_uniq<SasExportBindData>();
+		c->format = format;
 		c->label = label;
 		c->table_name = table_name;
+		c->compression = compression;
 		c->columns = columns;
 		return std::move(c);
 	}
@@ -136,7 +146,8 @@ struct SasExportBindData : public FunctionData {
 				return false;
 			}
 		}
-		return label == other.label && table_name == other.table_name;
+		return format == other.format && label == other.label && table_name == other.table_name &&
+		       compression == other.compression;
 	}
 };
 
@@ -151,51 +162,88 @@ struct SasExportLocalState : public LocalFunctionData {};
 
 // ─── Bind ──────────────────────────────────────────────────────────────────────
 
+static SasFormat FormatFromInfo(const CopyInfo &info) {
+	auto fmt = StringUtil::Lower(info.format);
+	if (fmt == "xpt") {
+		return SasFormat::XPT;
+	}
+	if (fmt == "sas7bdat") {
+		return SasFormat::SAS7BDAT;
+	}
+	throw BinderException("Unknown SAS export format '%s' (expected 'xpt' or 'sas7bdat')", info.format);
+}
+
+static const char *FormatLabel(SasFormat f) {
+	return f == SasFormat::XPT ? "XPT" : "SAS7BDAT";
+}
+
 static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFunctionBindInput &input,
                                               const vector<string> &names, const vector<LogicalType> &sql_types) {
 	auto bind_data = make_uniq<SasExportBindData>();
+	bind_data->format = FormatFromInfo(input.info);
+	const auto fmt = bind_data->format;
+	const auto *fmt_label = FormatLabel(fmt);
 
-	// Default XPT internal table name: file basename, mangled to ≤ 8 chars uppercase.
-	auto path = input.info.file_path;
-	auto slash = path.find_last_of("/\\");
-	auto base = slash == string::npos ? path : path.substr(slash + 1);
-	auto dot = base.find_last_of('.');
-	if (dot != string::npos) {
-		base = base.substr(0, dot);
-	}
-	if (base.empty()) {
-		base = "DATASET";
-	}
-	// Truncate to fit XPT's 8-char limit before validation; user-provided names go through
-	// strict validation below.
-	if (base.size() > 8) {
-		base = base.substr(0, 8);
+	// XPT-only: derive a default internal dataset name from the path basename.
+	// SAS7BDAT ignores readstat_writer_set_table_name, so we only build it for XPT.
+	string xpt_base;
+	if (fmt == SasFormat::XPT) {
+		auto path = input.info.file_path;
+		auto slash = path.find_last_of("/\\");
+		xpt_base = slash == string::npos ? path : path.substr(slash + 1);
+		auto dot = xpt_base.find_last_of('.');
+		if (dot != string::npos) {
+			xpt_base = xpt_base.substr(0, dot);
+		}
+		if (xpt_base.empty()) {
+			xpt_base = "DATASET";
+		}
+		if (xpt_base.size() > 8) {
+			xpt_base = xpt_base.substr(0, 8);
+		}
 	}
 
 	bool table_name_user_provided = false;
 	for (auto &option : input.info.options) {
 		auto loption = StringUtil::Lower(option.first);
 		if (option.second.size() != 1) {
-			throw BinderException("XPT %s requires exactly one argument", StringUtil::Upper(loption));
+			throw BinderException("%s %s requires exactly one argument", fmt_label, StringUtil::Upper(loption));
 		}
 		if (loption == "label") {
 			bind_data->label = option.second[0].ToString();
 		} else if (loption == "table_name") {
-			base = option.second[0].ToString();
+			if (fmt != SasFormat::XPT) {
+				throw BinderException("TABLE_NAME option is only meaningful for XPT export, not %s", fmt_label);
+			}
+			xpt_base = option.second[0].ToString();
 			table_name_user_provided = true;
+		} else if (loption == "compression") {
+			if (fmt != SasFormat::SAS7BDAT) {
+				throw BinderException("COMPRESSION option is only meaningful for SAS7BDAT export, not %s", fmt_label);
+			}
+			auto roption = StringUtil::Lower(option.second[0].ToString());
+			if (roption == "none") {
+				bind_data->compression = READSTAT_COMPRESS_NONE;
+			} else if (roption == "rows" || roption == "rle") {
+				bind_data->compression = READSTAT_COMPRESS_ROWS;
+			} else {
+				throw BinderException("SAS7BDAT COMPRESSION must be 'none' or 'rows', got '%s'", roption);
+			}
 		} else {
-			throw BinderException("Unrecognized XPT option: %s", option.first);
+			throw BinderException("Unrecognized %s option: %s", fmt_label, option.first);
 		}
 	}
 
-	try {
-		bind_data->table_name = ValidateXportV5Name(base, "TABLE_NAME");
-	} catch (const BinderException &) {
-		if (table_name_user_provided) {
-			throw;
+	if (fmt == SasFormat::XPT) {
+		try {
+			bind_data->table_name = ValidateColumnName(xpt_base, fmt, "TABLE_NAME");
+		} catch (const BinderException &) {
+			if (table_name_user_provided) {
+				throw;
+			}
+			// Auto-derived name from path didn't fit XPT v5; fall back to "DATASET".
+			bind_data->table_name = "DATASET";
 		}
-		// Auto-derived name from path didn't fit; fall back to "DATASET".
-		bind_data->table_name = "DATASET";
 	}
 
 	bind_data->columns.reserve(names.size());
@@ -204,7 +252,7 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 		spec.original_name = names[i];
 		spec.duckdb_type = sql_types[i];
 		MapDuckDBType(sql_types[i], spec);
-		spec.mangled_name = ValidateXportV5Name(names[i], "column name");
+		spec.mangled_name = ValidateColumnName(names[i], fmt, "column name");
 		bind_data->columns.push_back(std::move(spec));
 	}
 
@@ -394,13 +442,23 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 
 	auto *writer = readstat_writer_init();
 	readstat_set_data_writer(writer, SasExportDataWriter);
-	readstat_writer_set_file_format_version(writer, 5);
+
+	if (bind_data.format == SasFormat::XPT) {
+		// XPT v5 — most universally readable XPT version. v8 (longer names, wider
+		// strings) is a future phase.
+		readstat_writer_set_file_format_version(writer, 5);
+		if (!bind_data.table_name.empty()) {
+			readstat_writer_set_table_name(writer, bind_data.table_name.c_str());
+		}
+	} else {
+		// SAS7BDAT: optional row-level RLE compression (matches `proc copy ... compress=`).
+		if (bind_data.compression != READSTAT_COMPRESS_NONE) {
+			readstat_writer_set_compression(writer, bind_data.compression);
+		}
+	}
 
 	if (!bind_data.label.empty()) {
 		readstat_writer_set_file_label(writer, bind_data.label.c_str());
-	}
-	if (!bind_data.table_name.empty()) {
-		readstat_writer_set_table_name(writer, bind_data.table_name.c_str());
 	}
 
 	vector<readstat_variable_t *> vars(bind_data.columns.size(), nullptr);
@@ -417,11 +475,16 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 	}
 
 	long row_count = static_cast<long>(gstate.buffer->Count());
-	auto err = readstat_begin_writing_xport(writer, gstate.file_handle.get(), row_count);
+	readstat_error_t err;
+	if (bind_data.format == SasFormat::XPT) {
+		err = readstat_begin_writing_xport(writer, gstate.file_handle.get(), row_count);
+	} else {
+		err = readstat_begin_writing_sas7bdat(writer, gstate.file_handle.get(), row_count);
+	}
 	if (err != READSTAT_OK) {
 		auto msg = readstat_error_message(err);
 		readstat_writer_free(writer);
-		throw IOException("Failed to begin XPT write: %s", msg ? msg : "unknown");
+		throw IOException("Failed to begin %s write: %s", FormatLabel(bind_data.format), msg ? msg : "unknown");
 	}
 
 	DataChunk chunk;
@@ -440,7 +503,7 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 			if (err != READSTAT_OK) {
 				auto msg = readstat_error_message(err);
 				readstat_writer_free(writer);
-				throw IOException("XPT begin_row failed: %s", msg ? msg : "unknown");
+				throw IOException("%s begin_row failed: %s", FormatLabel(bind_data.format), msg ? msg : "unknown");
 			}
 			for (idx_t c = 0; c < bind_data.columns.size(); c++) {
 				InsertValue(writer, vars[c], bind_data.columns[c], chunk.data[c], r, formats[c]);
@@ -449,7 +512,7 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 			if (err != READSTAT_OK) {
 				auto msg = readstat_error_message(err);
 				readstat_writer_free(writer);
-				throw IOException("XPT end_row failed: %s", msg ? msg : "unknown");
+				throw IOException("%s end_row failed: %s", FormatLabel(bind_data.format), msg ? msg : "unknown");
 			}
 		}
 		chunk.Reset();
@@ -459,7 +522,7 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 	readstat_writer_free(writer);
 	if (err != READSTAT_OK) {
 		auto msg = readstat_error_message(err);
-		throw IOException("XPT end_writing failed: %s", msg ? msg : "unknown");
+		throw IOException("%s end_writing failed: %s", FormatLabel(bind_data.format), msg ? msg : "unknown");
 	}
 
 	gstate.file_handle->Close();
@@ -474,17 +537,30 @@ static CopyFunctionExecutionMode SasExportExecutionMode(bool, bool) {
 
 // ─── Registration ──────────────────────────────────────────────────────────────
 
+static void WireCopyFunction(CopyFunction &fn) {
+	fn.copy_to_bind = SasExportBind;
+	fn.copy_to_initialize_global = SasExportInitGlobal;
+	fn.copy_to_initialize_local = SasExportInitLocal;
+	fn.copy_to_sink = SasExportSink;
+	fn.copy_to_combine = SasExportCombine;
+	fn.copy_to_finalize = SasExportFinalize;
+	fn.execution_mode = SasExportExecutionMode;
+}
+
 void RegisterSasExport(ExtensionLoader &loader) {
 	CopyFunction xpt("xpt");
-	xpt.copy_to_bind = SasExportBind;
-	xpt.copy_to_initialize_global = SasExportInitGlobal;
-	xpt.copy_to_initialize_local = SasExportInitLocal;
-	xpt.copy_to_sink = SasExportSink;
-	xpt.copy_to_combine = SasExportCombine;
-	xpt.copy_to_finalize = SasExportFinalize;
-	xpt.execution_mode = SasExportExecutionMode;
+	WireCopyFunction(xpt);
 	xpt.extension = "xpt";
 	loader.RegisterFunction(xpt);
+
+	// SAS7BDAT: round-trips through this extension's read_stat() and other
+	// ReadStat-based readers (pyreadstat, haven). A long-standing upstream
+	// limitation means real SAS / SAS Universal Viewer cannot open these files.
+	// CHANGELOG flags this caveat for users.
+	CopyFunction sas7bdat("sas7bdat");
+	WireCopyFunction(sas7bdat);
+	sas7bdat.extension = "sas7bdat";
+	loader.RegisterFunction(sas7bdat);
 }
 
 } // namespace duckdb

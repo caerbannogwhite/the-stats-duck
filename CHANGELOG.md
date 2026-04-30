@@ -22,6 +22,13 @@ that name is preserved across releases for backward compatibility.
   silent truncation. Buffers the full result set in a `ColumnDataCollection`
   (spillable via DuckDB's buffer manager) before emitting, since ReadStat's writer
   requires the row count up front.
+- `COPY tbl TO 'file.sas7bdat'` — write SAS7BDAT files via ReadStat. Same type and
+  NULL semantics as XPT, but allows ≤ 32-char mixed-case column names. Optional
+  `LABEL` and `COMPRESSION` (`'none'` / `'rows'`) options. **Caveat:** ReadStat's
+  SAS7BDAT writer is reverse-engineered, and the produced files round-trip through
+  ReadStat-family readers (this extension's `read_stat()`, pyreadstat, haven, R)
+  but **are not opened by real SAS / SAS Universal Viewer / SAS OnDemand**. This
+  is a long-standing upstream limitation. Use XPT if you need SAS-native readability.
 
 ### Changed
 
