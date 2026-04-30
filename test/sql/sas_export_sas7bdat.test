@@ -141,7 +141,7 @@ COMPRESSION must be 'none' or 'rows'
 statement error
 COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.xpt' (COMPRESSION 'rows')
 ----
-COMPRESSION option is only meaningful for SAS7BDAT export
+COMPRESSION option is only meaningful for
 
 # Unsupported type still rejected.
 statement error

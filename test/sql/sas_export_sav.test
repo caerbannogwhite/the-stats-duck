@@ -1,0 +1,125 @@
+# name: test/sql/sas_export_sav.test
+# description: COPY ... TO '*.sav' — SPSS SAV round-trip via ReadStat
+# group: [stats_duck]
+
+require stats_duck
+
+# ─── Numeric round-trip ────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE nums AS SELECT * FROM (VALUES (1, 1.5), (2, 2.5), (3, 3.5)) AS t(I, X);
+
+statement ok
+COPY nums TO '__TEST_DIR__/nums.sav';
+
+query II
+SELECT CAST(I AS INTEGER), CAST(X * 10 AS INTEGER) FROM read_stat('__TEST_DIR__/nums.sav') ORDER BY I
+----
+1	15
+2	25
+3	35
+
+# ─── Strings ───────────────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE strs AS SELECT * FROM (VALUES ('alice', 1), ('bob', 2)) AS t(person_name, person_id);
+
+statement ok
+COPY strs TO '__TEST_DIR__/strs.sav';
+
+query TI
+SELECT person_name, CAST(person_id AS INTEGER) FROM read_stat('__TEST_DIR__/strs.sav') ORDER BY person_id
+----
+alice	1
+bob	2
+
+# ─── NULLs ─────────────────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE nulls AS SELECT * FROM (VALUES (1, 'a'), (NULL, 'b')) AS t(N, S);
+
+statement ok
+COPY nulls TO '__TEST_DIR__/nulls.sav';
+
+query IT
+SELECT CAST(N AS INTEGER), S FROM read_stat('__TEST_DIR__/nulls.sav') ORDER BY N NULLS LAST
+----
+1	a
+NULL	b
+
+# ─── Temporal types — SAV writes SPSS-native epoch (seconds since 1582-10-14) ─
+
+statement ok
+CREATE TABLE temporals AS SELECT * FROM (VALUES
+    (DATE '2024-01-15', TIMESTAMP '2024-01-15 10:30:45'),
+    (DATE '1960-01-01', TIMESTAMP '1960-01-01 00:00:00')
+) AS t(D, TS);
+
+statement ok
+COPY temporals TO '__TEST_DIR__/temporals.sav';
+
+query TT
+SELECT D, TS FROM read_stat('__TEST_DIR__/temporals.sav') ORDER BY D
+----
+1960-01-01	1960-01-01 00:00:00
+2024-01-15	2024-01-15 10:30:45
+
+# ─── COMPRESSION option ────────────────────────────────────────────────────────
+
+statement ok
+COPY (SELECT range AS i FROM range(20)) TO '__TEST_DIR__/compressed.sav' (COMPRESSION 'rows');
+
+query I
+SELECT COUNT(*) FROM read_stat('__TEST_DIR__/compressed.sav')
+----
+20
+
+# ─── COPY (subquery) form ─────────────────────────────────────────────────────
+
+statement ok
+COPY (SELECT 42 AS the_answer, 'hello' AS greeting) TO '__TEST_DIR__/inline.sav';
+
+query IT
+SELECT CAST(the_answer AS INTEGER), greeting FROM read_stat('__TEST_DIR__/inline.sav')
+----
+42	hello
+
+# ─── FORMAT override ──────────────────────────────────────────────────────────
+
+statement ok
+COPY (SELECT 7 AS X) TO '__TEST_DIR__/explicit.dat' (FORMAT 'sav');
+
+query I
+SELECT CAST(X AS INTEGER) FROM read_stat('__TEST_DIR__/explicit.dat', format := 'sav')
+----
+7
+
+# ─── Long column names accepted (32-char limit, like SAS7BDAT) ────────────────
+
+statement ok
+COPY (SELECT 1 AS a_thirty_char_column_name_demo01) TO '__TEST_DIR__/longname.sav';
+
+query I
+SELECT CAST(a_thirty_char_column_name_demo01 AS INTEGER) FROM read_stat('__TEST_DIR__/longname.sav')
+----
+1
+
+# ─── Negative cases ────────────────────────────────────────────────────────────
+
+# > 32-char column name still rejected.
+statement error
+COPY (SELECT 1 AS this_name_is_way_more_than_thirty_two_chars_long) TO '__TEST_DIR__/bad.sav'
+----
+too long for SAV
+
+# TABLE_NAME is XPT-only.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.sav' (TABLE_NAME 'NAME')
+----
+TABLE_NAME option is only meaningful for XPT export
+
+# Bogus COMPRESSION value.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.sav' (COMPRESSION 'gzip')
+----
+COMPRESSION must be 'none' or 'rows'

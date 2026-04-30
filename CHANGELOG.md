@@ -29,6 +29,10 @@ that name is preserved across releases for backward compatibility.
   ReadStat-family readers (this extension's `read_stat()`, pyreadstat, haven, R)
   but **are not opened by real SAS / SAS Universal Viewer / SAS OnDemand**. This
   is a long-standing upstream limitation. Use XPT if you need SAS-native readability.
+- `COPY tbl TO 'file.sav'` — write SPSS SAV files via ReadStat. Same scaffolding
+  as the SAS exports; uses SPSS-native epoch (seconds since 1582-10-14) and SPSS
+  format strings (`DATE11`, `DATETIME20`, `TIME8`) for temporal columns. Optional
+  `LABEL` and `COMPRESSION` (`'none'` / `'rows'`) options.
 
 ### Changed
 

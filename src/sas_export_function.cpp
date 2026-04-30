@@ -21,18 +21,21 @@ extern "C" {
 
 namespace duckdb {
 
-enum class SasFormat { XPT, SAS7BDAT };
+enum class SasFormat { XPT, SAS7BDAT, SAV };
 
 // ─── Per-format column-name validation ─────────────────────────────────────────
 // XPT v5: ≤ 8 chars, uppercased, ASCII alphanumeric or underscore, must start
 // with a letter or underscore. Names are uppercased before validation —
 // silent truncation would create silent collisions on round-trip.
-// SAS7BDAT: ≤ 32 chars, otherwise the same character rules. Case is preserved
-// (real SAS is case-insensitive but stores the user's casing).
+// SAS7BDAT / SAV: ≤ 32 chars, otherwise the same character rules. Case is
+// preserved (real SAS is case-insensitive but stores the user's casing; SPSS
+// is case-sensitive in modern versions).
 
 static string ValidateColumnName(const string &name, SasFormat format, const char *role) {
 	const size_t max_len = (format == SasFormat::XPT) ? 8 : 32;
-	const char *format_label = (format == SasFormat::XPT) ? "XPT v5" : "SAS7BDAT";
+	const char *format_label = format == SasFormat::XPT     ? "XPT v5"
+	                           : format == SasFormat::SAS7BDAT ? "SAS7BDAT"
+	                                                          : "SAV";
 
 	if (name.empty()) {
 		throw BinderException("Empty %s not allowed in %s export", role, format_label);
@@ -62,11 +65,13 @@ struct ColumnSpec {
 	string mangled_name;
 	LogicalType duckdb_type;
 	readstat_type_t rs_type;
-	string rs_format;     // "DATE9.", "DATETIME20.", "TIME8.", or ""
+	string rs_format;     // SAS-style "DATE9." / SPSS-style "DATE11" / "" for non-temporal
 	size_t storage_width; // ReadStat's storage_width (only used for STRING in non-XPT)
 };
 
-static void MapDuckDBType(const LogicalType &dt, ColumnSpec &spec) {
+static void MapDuckDBType(const LogicalType &dt, SasFormat fmt, ColumnSpec &spec) {
+	const bool is_spss = fmt == SasFormat::SAV;
+
 	switch (dt.id()) {
 	case LogicalTypeId::BOOLEAN:
 	case LogicalTypeId::TINYINT:
@@ -94,25 +99,25 @@ static void MapDuckDBType(const LogicalType &dt, ColumnSpec &spec) {
 		return;
 	case LogicalTypeId::DATE:
 		spec.rs_type = READSTAT_TYPE_DOUBLE;
-		spec.rs_format = "DATE9.";
+		// SPSS format strings have no trailing period and use widths from the SPSS
+		// docs; SAS format strings end with a period. Reader's epoch detection keys
+		// off the format-string text, so the writer must match the format family.
+		// Picks "DATETIME19." (SAS-only, dodges the reader's SPSS-claims-DATETIME20 bug).
+		spec.rs_format = is_spss ? "DATE11" : "DATE9.";
 		spec.storage_width = 8;
 		return;
 	case LogicalTypeId::TIMESTAMP:
 		spec.rs_type = READSTAT_TYPE_DOUBLE;
-		// DATETIME19. (not DATETIME20.) — both are valid SAS datetime widths, but
-		// "DATETIME20" is ambiguous in our reader's epoch heuristic (it appears in
-		// both the SAS and SPSS format tables, and the SPSS branch wins). DATETIME19.
-		// is unambiguously SAS, so XPT round-trip lands on the right epoch.
-		spec.rs_format = "DATETIME19.";
+		spec.rs_format = is_spss ? "DATETIME20" : "DATETIME19.";
 		spec.storage_width = 8;
 		return;
 	case LogicalTypeId::TIME:
 		spec.rs_type = READSTAT_TYPE_DOUBLE;
-		spec.rs_format = "TIME8.";
+		spec.rs_format = is_spss ? "TIME8" : "TIME8.";
 		spec.storage_width = 8;
 		return;
 	default:
-		throw BinderException("stats_duck: column '%s' has unsupported type %s for SAS export",
+		throw BinderException("stats_duck: column '%s' has unsupported type %s for export",
 		                      spec.original_name, dt.ToString());
 	}
 }
@@ -170,11 +175,23 @@ static SasFormat FormatFromInfo(const CopyInfo &info) {
 	if (fmt == "sas7bdat") {
 		return SasFormat::SAS7BDAT;
 	}
-	throw BinderException("Unknown SAS export format '%s' (expected 'xpt' or 'sas7bdat')", info.format);
+	if (fmt == "sav") {
+		return SasFormat::SAV;
+	}
+	throw BinderException("Unknown stats_duck export format '%s' (expected 'xpt', 'sas7bdat', or 'sav')",
+	                      info.format);
 }
 
 static const char *FormatLabel(SasFormat f) {
-	return f == SasFormat::XPT ? "XPT" : "SAS7BDAT";
+	switch (f) {
+	case SasFormat::XPT:
+		return "XPT";
+	case SasFormat::SAS7BDAT:
+		return "SAS7BDAT";
+	case SasFormat::SAV:
+		return "SAV";
+	}
+	return "?";
 }
 
 static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFunctionBindInput &input,
@@ -218,8 +235,9 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 			xpt_base = option.second[0].ToString();
 			table_name_user_provided = true;
 		} else if (loption == "compression") {
-			if (fmt != SasFormat::SAS7BDAT) {
-				throw BinderException("COMPRESSION option is only meaningful for SAS7BDAT export, not %s", fmt_label);
+			if (fmt != SasFormat::SAS7BDAT && fmt != SasFormat::SAV) {
+				throw BinderException("COMPRESSION option is only meaningful for SAS7BDAT and SAV export, not %s",
+				                      fmt_label);
 			}
 			auto roption = StringUtil::Lower(option.second[0].ToString());
 			if (roption == "none") {
@@ -227,7 +245,7 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 			} else if (roption == "rows" || roption == "rle") {
 				bind_data->compression = READSTAT_COMPRESS_ROWS;
 			} else {
-				throw BinderException("SAS7BDAT COMPRESSION must be 'none' or 'rows', got '%s'", roption);
+				throw BinderException("%s COMPRESSION must be 'none' or 'rows', got '%s'", fmt_label, roption);
 			}
 		} else {
 			throw BinderException("Unrecognized %s option: %s", fmt_label, option.first);
@@ -251,7 +269,7 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 		ColumnSpec spec;
 		spec.original_name = names[i];
 		spec.duckdb_type = sql_types[i];
-		MapDuckDBType(sql_types[i], spec);
+		MapDuckDBType(sql_types[i], fmt, spec);
 		spec.mangled_name = ValidateColumnName(names[i], fmt, "column name");
 		bind_data->columns.push_back(std::move(spec));
 	}
@@ -342,7 +360,8 @@ static ssize_t SasExportDataWriter(const void *bytes, size_t len, void *ctx) {
 // ─── Per-cell value insertion ──────────────────────────────────────────────────
 
 static void InsertValue(readstat_writer_t *writer, const readstat_variable_t *var, const ColumnSpec &spec,
-                        const Vector &vec_p, idx_t row, UnifiedVectorFormat &fmt) {
+                        SasFormat sas_format, const Vector &vec_p, idx_t row, UnifiedVectorFormat &fmt) {
+	const int32_t epoch_offset = sas_format == SasFormat::SAV ? SPSS_EPOCH_OFFSET : SAS_EPOCH_OFFSET;
 	auto idx = fmt.sel->get_index(row);
 	if (!fmt.validity.RowIsValid(idx)) {
 		readstat_insert_missing_value(writer, var);
@@ -410,17 +429,20 @@ static void InsertValue(readstat_writer_t *writer, const readstat_variable_t *va
 		break;
 	}
 	case LogicalTypeId::DATE: {
-		// DuckDB date_t::days is days since 1970-01-01 (Unix epoch).
-		// SAS date is days since 1960-01-01. SAS_EPOCH_OFFSET = -3653 (days from
-		// 1970 back to 1960), so SAS days = duckdb_days - SAS_EPOCH_OFFSET.
+		// DuckDB date_t::days = days since 1970-01-01.
+		// Target epoch days = duckdb_days - epoch_offset.
+		// SAS DATE: days since 1960-01-01 (epoch_offset = SAS_EPOCH_OFFSET = -3653).
+		// SPSS DATE: SECONDS since 1582-10-14 (epoch_offset = SPSS_EPOCH_OFFSET = -141428,
+		// then × 86400 to convert days→seconds).
 		auto days = UnifiedVectorFormat::GetData<date_t>(fmt)[idx].days;
-		double sas_days = static_cast<double>(days - SAS_EPOCH_OFFSET);
-		readstat_insert_double_value(writer, var, sas_days);
+		double offset_days = static_cast<double>(days - epoch_offset);
+		double v = sas_format == SasFormat::SAV ? offset_days * 86400.0 : offset_days;
+		readstat_insert_double_value(writer, var, v);
 		break;
 	}
 	case LogicalTypeId::TIMESTAMP: {
 		auto micros = UnifiedVectorFormat::GetData<timestamp_t>(fmt)[idx].value;
-		double secs = static_cast<double>(micros) / 1e6 - static_cast<double>(SAS_EPOCH_OFFSET) * 86400.0;
+		double secs = static_cast<double>(micros) / 1e6 - static_cast<double>(epoch_offset) * 86400.0;
 		readstat_insert_double_value(writer, var, secs);
 		break;
 	}
@@ -452,6 +474,7 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 		}
 	} else {
 		// SAS7BDAT: optional row-level RLE compression (matches `proc copy ... compress=`).
+		// SAV: optional row compression (SPSS's "compressed save").
 		if (bind_data.compression != READSTAT_COMPRESS_NONE) {
 			readstat_writer_set_compression(writer, bind_data.compression);
 		}
@@ -476,10 +499,16 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 
 	long row_count = static_cast<long>(gstate.buffer->Count());
 	readstat_error_t err;
-	if (bind_data.format == SasFormat::XPT) {
+	switch (bind_data.format) {
+	case SasFormat::XPT:
 		err = readstat_begin_writing_xport(writer, gstate.file_handle.get(), row_count);
-	} else {
+		break;
+	case SasFormat::SAS7BDAT:
 		err = readstat_begin_writing_sas7bdat(writer, gstate.file_handle.get(), row_count);
+		break;
+	case SasFormat::SAV:
+		err = readstat_begin_writing_sav(writer, gstate.file_handle.get(), row_count);
+		break;
 	}
 	if (err != READSTAT_OK) {
 		auto msg = readstat_error_message(err);
@@ -506,7 +535,8 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 				throw IOException("%s begin_row failed: %s", FormatLabel(bind_data.format), msg ? msg : "unknown");
 			}
 			for (idx_t c = 0; c < bind_data.columns.size(); c++) {
-				InsertValue(writer, vars[c], bind_data.columns[c], chunk.data[c], r, formats[c]);
+				InsertValue(writer, vars[c], bind_data.columns[c], bind_data.format, chunk.data[c], r,
+				            formats[c]);
 			}
 			err = readstat_end_row(writer);
 			if (err != READSTAT_OK) {
@@ -561,6 +591,13 @@ void RegisterSasExport(ExtensionLoader &loader) {
 	WireCopyFunction(sas7bdat);
 	sas7bdat.extension = "sas7bdat";
 	loader.RegisterFunction(sas7bdat);
+
+	// SPSS .sav — same writer family, no SAS-side caveat (real SPSS / PSPP read
+	// these files cleanly).
+	CopyFunction sav("sav");
+	WireCopyFunction(sav);
+	sav.extension = "sav";
+	loader.RegisterFunction(sav);
 }
 
 } // namespace duckdb
