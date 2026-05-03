@@ -10,6 +10,30 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+### Added
+
+- `COPY tbl TO 'file.xpt'` — write SAS Transport (XPT v5) files via ReadStat.
+  Supports BOOLEAN, all integer/float/decimal types, VARCHAR, DATE, TIMESTAMP, and
+  TIME columns. Numeric NULLs round-trip as SAS system-missing; VARCHAR NULLs
+  collapse to empty strings (SAS character columns have no NULL/empty distinction).
+  Output goes through DuckDB's `FileSystem` so registered/remote/WASM paths work
+  the same as `read_stat()`. Optional `LABEL` and `TABLE_NAME` options. XPT v5
+  column-name rules (≤ 8 chars uppercase, A-Z 0-9 _) are validated at bind — no
+  silent truncation. Buffers the full result set in a `ColumnDataCollection`
+  (spillable via DuckDB's buffer manager) before emitting, since ReadStat's writer
+  requires the row count up front.
+- `COPY tbl TO 'file.sas7bdat'` — write SAS7BDAT files via ReadStat. Same type and
+  NULL semantics as XPT, but allows ≤ 32-char mixed-case column names. Optional
+  `LABEL` and `COMPRESSION` (`'none'` / `'rows'`) options. **Caveat:** ReadStat's
+  SAS7BDAT writer is reverse-engineered, and the produced files round-trip through
+  ReadStat-family readers (this extension's `read_stat()`, pyreadstat, haven, R)
+  but **are not opened by real SAS / SAS Universal Viewer / SAS OnDemand**. This
+  is a long-standing upstream limitation. Use XPT if you need SAS-native readability.
+- `COPY tbl TO 'file.sav'` — write SPSS SAV files via ReadStat. Same scaffolding
+  as the SAS exports; uses SPSS-native epoch (seconds since 1582-10-14) and SPSS
+  format strings (`DATE11`, `DATETIME20`, `TIME8`) for temporal columns. Optional
+  `LABEL` and `COMPRESSION` (`'none'` / `'rows'`) options.
+
 ### Changed
 
 - Target DuckDB v1.5.1 (up from v1.2.2). Extensions built for 0.1.x are

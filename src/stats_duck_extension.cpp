@@ -11,6 +11,7 @@
 #include "anova_function.hpp"
 #include "chisq_function.hpp"
 #include "read_stat_function.hpp"
+#include "sas_export_function.hpp"
 #include "ggsql.hpp"
 #include "ggsql_marks_internal.hpp"
 
@@ -38,6 +39,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Data import
 	RegisterReadStat(loader);
+
+	// Data export (SAS XPT)
+	RegisterSasExport(loader);
 
 	// ggsql: Grammar of Graphics for SQL (parser extension + marks)
 	RegisterGgsql(loader);

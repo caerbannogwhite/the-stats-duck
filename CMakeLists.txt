@@ -33,6 +33,7 @@ set(READSTAT_SOURCES
     ${READSTAT_DIR}/sas/readstat_sas.c
     ${READSTAT_DIR}/sas/readstat_sas_rle.c
     ${READSTAT_DIR}/sas/readstat_sas7bdat_read.c
+    ${READSTAT_DIR}/sas/readstat_sas7bdat_write.c
     ${READSTAT_DIR}/sas/readstat_xport.c
     ${READSTAT_DIR}/sas/readstat_xport_parse_format.c
     ${READSTAT_DIR}/sas/readstat_xport_read.c
@@ -73,6 +74,7 @@ set(EXTENSION_SOURCES
     src/chisq_function.cpp
     src/read_stat_function.cpp
     src/read_stat_types.cpp
+    src/sas_export_function.cpp
     src/ggsql.cpp
     src/ggsql_grammar.cpp
     src/ggsql_marks.cpp

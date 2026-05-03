@@ -1,0 +1,150 @@
+# name: test/sql/sas_export_sas7bdat.test
+# description: COPY ... TO '*.sas7bdat' — SAS7BDAT round-trip via ReadStat
+#              CAVEAT: ReadStat's SAS7BDAT writer produces files that are
+#              readable by ReadStat-family tools (this extension's read_stat(),
+#              pyreadstat, haven, R) but NOT by real SAS / SAS Universal
+#              Viewer. The format is reverse-engineered and the upstream issue
+#              has been open for years. Use XPT if you need SAS-readable output.
+# group: [stats_duck]
+
+require stats_duck
+
+# ─── Numeric round-trip ────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE nums AS SELECT * FROM (VALUES (1, 1.5), (2, 2.5), (3, 3.5)) AS t(I, X);
+
+statement ok
+COPY nums TO '__TEST_DIR__/nums.sas7bdat';
+
+query II
+SELECT CAST(I AS INTEGER), CAST(X * 10 AS INTEGER) FROM read_stat('__TEST_DIR__/nums.sas7bdat') ORDER BY I
+----
+1	15
+2	25
+3	35
+
+# ─── Strings (longer names allowed than XPT v5) ────────────────────────────────
+
+statement ok
+CREATE TABLE strs AS SELECT * FROM (VALUES ('alice', 1), ('bob', 2)) AS t(person_name, person_id);
+
+statement ok
+COPY strs TO '__TEST_DIR__/strs.sas7bdat';
+
+query TI
+SELECT person_name, CAST(person_id AS INTEGER) FROM read_stat('__TEST_DIR__/strs.sas7bdat') ORDER BY person_id
+----
+alice	1
+bob	2
+
+# ─── NULL numerics round-trip ──────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE nulls AS SELECT * FROM (VALUES (1, 'a'), (NULL, 'b')) AS t(N, S);
+
+statement ok
+COPY nulls TO '__TEST_DIR__/nulls.sas7bdat';
+
+query IT
+SELECT CAST(N AS INTEGER), S FROM read_stat('__TEST_DIR__/nulls.sas7bdat') ORDER BY N NULLS LAST
+----
+1	a
+NULL	b
+
+# ─── Temporal types ────────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE temporals AS SELECT * FROM (VALUES
+    (DATE '2024-01-15', TIMESTAMP '2024-01-15 10:30:45', TIME '10:30:45'),
+    (DATE '1960-01-01', TIMESTAMP '1960-01-01 00:00:00', TIME '00:00:00')
+) AS t(D, TS, TM);
+
+statement ok
+COPY temporals TO '__TEST_DIR__/temporals.sas7bdat';
+
+query TTT
+SELECT D, TS, TM FROM read_stat('__TEST_DIR__/temporals.sas7bdat') ORDER BY D
+----
+1960-01-01	1960-01-01 00:00:00	00:00:00
+2024-01-15	2024-01-15 10:30:45	10:30:45
+
+# ─── COMPRESSION option ────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE wide AS SELECT range AS i, repeat('x', 50) AS s FROM range(50);
+
+statement ok
+COPY wide TO '__TEST_DIR__/uncompressed.sas7bdat';
+
+statement ok
+COPY wide TO '__TEST_DIR__/rows.sas7bdat' (COMPRESSION 'rows');
+
+# Both round-trip to the same logical content.
+query II
+SELECT (SELECT COUNT(*) FROM read_stat('__TEST_DIR__/uncompressed.sas7bdat')),
+       (SELECT COUNT(*) FROM read_stat('__TEST_DIR__/rows.sas7bdat'))
+----
+50	50
+
+# ─── COPY (subquery) form ─────────────────────────────────────────────────────
+
+statement ok
+COPY (SELECT 42 AS the_answer, 'hello' AS greeting) TO '__TEST_DIR__/inline.sas7bdat';
+
+query IT
+SELECT CAST(the_answer AS INTEGER), greeting FROM read_stat('__TEST_DIR__/inline.sas7bdat')
+----
+42	hello
+
+# ─── FORMAT override ──────────────────────────────────────────────────────────
+
+statement ok
+COPY (SELECT 7 AS X) TO '__TEST_DIR__/explicit.dat' (FORMAT 'sas7bdat');
+
+query I
+SELECT CAST(X AS INTEGER) FROM read_stat('__TEST_DIR__/explicit.dat', format := 'sas7bdat')
+----
+7
+
+# ─── 32-char column names allowed (vs XPT's 8-char limit) ─────────────────────
+
+statement ok
+COPY (SELECT 1 AS this_is_a_long_name_thirty_chars) TO '__TEST_DIR__/long_names.sas7bdat';
+
+query I
+SELECT CAST(this_is_a_long_name_thirty_chars AS INTEGER) FROM read_stat('__TEST_DIR__/long_names.sas7bdat')
+----
+1
+
+# ─── Negative cases ────────────────────────────────────────────────────────────
+
+# > 32-char column name is still rejected.
+statement error
+COPY (SELECT 1 AS this_name_is_more_than_thirty_two_chars_long) TO '__TEST_DIR__/bad.sas7bdat'
+----
+too long for SAS7BDAT
+
+# TABLE_NAME is XPT-only.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.sas7bdat' (TABLE_NAME 'NAME')
+----
+TABLE_NAME option is only meaningful for XPT export
+
+# Bogus COMPRESSION value.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.sas7bdat' (COMPRESSION 'gzip')
+----
+COMPRESSION must be 'none' or 'rows'
+
+# COMPRESSION on XPT is rejected.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.xpt' (COMPRESSION 'rows')
+----
+COMPRESSION option is only meaningful for
+
+# Unsupported type still rejected.
+statement error
+COPY (SELECT [1, 2, 3] AS X) TO '__TEST_DIR__/bad.sas7bdat'
+----
+unsupported type
