@@ -3,10 +3,10 @@
 A statistical computing toolkit for DuckDB.
 
 The Stats Duck brings statistical workflows — descriptive statistics, hypothesis
-tests, and direct readers for SAS, SPSS, and Stata files — into SQL. Functions
-are implemented as streaming aggregates and scalar primitives, so they scale
-from local notebooks to billion-row warehouses and also run inside DuckDB-WASM
-in the browser.
+tests, grammar-of-graphics visualization, and direct readers/writers for SAS,
+SPSS, and Stata files — into SQL. Functions are implemented as streaming
+aggregates and scalar primitives, so they scale from local notebooks to
+billion-row warehouses and also run inside DuckDB-WASM in the browser.
 
 > The extension installs and loads in DuckDB under the technical name
 > `stats_duck` (matching the binary, the SQL function namespace, and the
@@ -16,13 +16,18 @@ in the browser.
 ## Scope
 
 The Stats Duck is meant to cover the everyday work of a general-purpose
-statistician without leaving SQL. The current release focuses on three areas:
+statistician without leaving SQL. The current release covers four areas:
 
 - **Hypothesis tests** — parametric and non-parametric, with effect sizes and
   confidence intervals returned alongside the test statistic.
-- **Statistical file I/O** — first-class readers for SAS, SPSS, and Stata
-  files, integrated with DuckDB's virtual file system so they work transparently
-  with local paths, `httpfs://`, `s3://`, and registered WASM file buffers.
+- **Visualizations (ggsql)** — `VISUALIZE … FROM <table> DRAW <mark>`, a
+  Posit-published Grammar-of-Graphics SQL dialect compiled to Vega-Lite v5.
+  No server-side rendering: the extension emits a spec + per-layer SQL, and
+  the client (browser, notebook, …) runs the SQL and feeds the rows to vega.
+- **Statistical file I/O** — first-class readers AND writers for SAS, SPSS, and
+  Stata files, integrated with DuckDB's virtual file system so they work
+  transparently with local paths, `httpfs://`, `s3://`, and registered WASM
+  file buffers.
 - **Streaming aggregates** — every test is a single-pass aggregate over the
   data, so it composes naturally with `GROUP BY`, window frames, and DuckDB's
   parallel execution.
@@ -75,9 +80,49 @@ p-value, and relevant effect sizes / confidence intervals.
 
 ### Data import (table function)
 
-| Function                              | Description                 |
-| ------------------------------------- | --------------------------- |
+| Function                                | Description                   |
+| --------------------------------------- | ----------------------------- |
 | `read_stat(path, [format], [encoding])` | Read SAS / SPSS / Stata files |
+
+### Data export (COPY function)
+
+| Statement                                  | Description                      |
+| ------------------------------------------ | -------------------------------- |
+| `COPY <table> TO 'file.xpt'`               | Write SAS Transport (XPT v5)     |
+| `COPY <table> TO 'file.sas7bdat'`          | Write SAS7BDAT (see caveat below)|
+| `COPY <table> TO 'file.sav'`               | Write SPSS SAV                   |
+
+> **SAS7BDAT caveat.** ReadStat's SAS7BDAT writer is reverse-engineered: files
+> round-trip through ReadStat-family readers (this extension's `read_stat()`,
+> pyreadstat, haven, R) but are **not opened by real SAS / SAS Universal
+> Viewer / SAS OnDemand**. Use XPT for SAS-native readability.
+
+### Visualizations (ggsql parser extension)
+
+A Grammar-of-Graphics SQL dialect: `VISUALIZE` returns a single row with two
+columns — `spec` (a complete Vega-Lite v5 JSON spec) and `layer_sqls` (a
+`MAP(VARCHAR, VARCHAR)` of named SQL strings, one per layer). The client
+runs each layer's SQL and feeds the rows to vega-embed via the `datasets` API.
+
+```
+VISUALIZE <expr> AS <aesthetic> [: <type>] (, <expr> AS <aesthetic> ...)
+FROM <table>
+DRAW <mark> (DRAW <mark>)*
+[FACET BY <expr> [ROWS | COLS]]
+[SCALE <channel> {TO <scheme> | ZERO true|false | DOMAIN <lo> <hi>}]*
+```
+
+**Marks:** `point`, `line`, `bar`, `histogram`, `text`, `area`, `rule`, `tick`,
+`errorbar`, `errorband`, `boxplot`. Custom marks register as `ggsql_mark_v1_<name>`
+scalar functions and are discovered via DuckDB's catalog, so other extensions can
+ship their own marks without modifying stats_duck.
+
+**Aesthetic channels:** `x`, `y`, `color`, `fill`, `stroke`, `shape`, `size`,
+`opacity`, `tooltip`, `text`, `x2`, `y2`. Unknown channels are silently dropped.
+
+**Type overrides:** append `:quantitative`, `:ordinal`, `:nominal`, or
+`:temporal` to an aesthetic to force its Vega-Lite type
+(e.g. `year AS color:ordinal`).
 
 **t-test result fields:** `test_type`, `t_statistic`, `df`, `p_value`, `alternative`, `mean_diff`, `ci_lower`, `ci_upper`, `cohens_d`
 
@@ -224,6 +269,87 @@ works against:
 - remote files (with the `httpfs` extension loaded): `read_stat('https://…/survey.sav')`
 - object stores: `read_stat('s3://bucket/survey.sav')`
 - in-browser DuckDB-WASM file buffers registered via `registerFileBuffer()`
+
+#### Writing statistical file formats
+
+The same VFS-backed writers, exposed as DuckDB `COPY` functions:
+
+```sql
+-- SAS Transport (XPT v5) — universally readable, FDA / pharma standard
+COPY survey TO 'survey.xpt';
+
+-- SAS7BDAT — round-trips through stats_duck and pyreadstat (NOT real SAS, see caveat)
+COPY survey TO 'survey.sas7bdat' (COMPRESSION 'rows');
+
+-- SPSS SAV
+COPY survey TO 'survey.sav';
+
+-- COPY <subquery> form works too
+COPY (SELECT * FROM huge_table WHERE region = 'EU') TO 'eu.xpt';
+```
+
+NULL handling differs by storage format: numeric NULLs round-trip as
+SAS/SPSS system-missing, but VARCHAR NULLs collapse to empty strings (these
+formats have no NULL/empty distinction for character columns).
+
+### Visualizations (ggsql)
+
+```sql
+-- Set up — penguin morphology, classic ggplot2 demo data
+CREATE TABLE penguins AS SELECT * FROM (VALUES
+    (39.1, 18.7, 'Adelie',    2018), (39.5, 17.4, 'Adelie',    2019),
+    (44.0, 18.0, 'Gentoo',    2020), (45.2, 14.5, 'Chinstrap', 2021)
+) AS t(bill_len, bill_dep, species, year);
+```
+
+#### Scatter
+
+```sql
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point;
+```
+
+#### Scatter colored by species, with a viridis scale
+
+```sql
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color
+FROM penguins
+DRAW point
+SCALE color TO viridis;
+```
+
+#### Multi-layer (scatter + line overlay)
+
+```sql
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW line;
+```
+
+#### Faceted plot — one panel per species, vertically stacked
+
+```sql
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins
+DRAW point FACET BY species ROWS;
+```
+
+#### SQL expressions in mappings
+
+```sql
+VISUALIZE bill_len * 2 AS x, log(bill_dep) AS y FROM penguins DRAW point;
+```
+
+#### Type-annotated aesthetic (year is INTEGER but should be ordinal here)
+
+```sql
+VISUALIZE bill_len AS x, bill_dep AS y, year AS color:ordinal
+FROM penguins
+DRAW point
+SCALE color TO viridis;
+```
+
+The output of any `VISUALIZE` query is a single row with `(spec, layer_sqls)`.
+The client side (a browser app, a notebook renderer, …) is responsible for
+running each layer's SQL and feeding the rows into vega-embed via its
+`datasets` API. See [Bedevere Wise](https://github.com/caerbannogwhite/bedevere-wise)
+for a reference DuckDB-WASM consumer.
 
 ## Building
 

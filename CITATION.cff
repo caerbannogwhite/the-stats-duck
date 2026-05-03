@@ -4,18 +4,19 @@ title: "The Stats Duck: A statistical computing toolkit for DuckDB"
 abstract: >-
   The Stats Duck is an open-source DuckDB extension that brings statistical
   computing — descriptive statistics, hypothesis tests, distribution
-  functions, and first-class readers for SAS, SPSS, and Stata files —
-  directly into SQL. Computations are implemented as streaming aggregates
-  and scalar functions so they scale to billion-row datasets and also run
-  in DuckDB-WASM in the browser.
+  functions, grammar-of-graphics visualization (ggsql), and first-class
+  readers and writers for SAS, SPSS, and Stata files — directly into SQL.
+  Computations are implemented as streaming aggregates and scalar functions
+  so they scale to billion-row datasets and also run in DuckDB-WASM in the
+  browser.
 type: software
 authors:
   - family-names: Meneghello
     given-names: Massimo
 repository-code: "https://github.com/caerbannogwhite/the-stats-duck"
 url: "https://github.com/caerbannogwhite/the-stats-duck"
-version: 0.1.0-mortician
-date-released: "2026-04-13"
+version: 0.2.0-bring-out-your-dead
+date-released: "2026-05-03"
 license: Apache-2.0
 keywords:
   - duckdb
@@ -30,3 +31,7 @@ keywords:
   - stata
   - readstat
   - wasm
+  - grammar-of-graphics
+  - ggplot2
+  - vega-lite
+  - data-visualization
