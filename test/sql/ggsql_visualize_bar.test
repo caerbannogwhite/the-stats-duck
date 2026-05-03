@@ -1,0 +1,19 @@
+# name: test/sql/ggsql_visualize_bar.test
+# description: ggsql DRAW bar — produces Vega-Lite bar spec, server-side GROUP BY + SUM
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE sales AS
+SELECT * FROM (VALUES ('a', 10), ('b', 20), ('a', 5)) AS t(cat, val);
+
+query TT
+VISUALIZE cat AS x, val AS y FROM sales DRAW bar
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"bar","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT x, SUM(y) AS y FROM (SELECT cat AS x, val AS y FROM sales) GROUP BY x ORDER BY x'}
+
+statement error
+VISUALIZE cat AS x FROM sales DRAW bar
+----
+'bar' requires 'y' aesthetic

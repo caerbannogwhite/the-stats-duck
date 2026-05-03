@@ -1,0 +1,70 @@
+# name: test/sql/ggsql_visualize_facet.test
+# description: Phase 6b — FACET BY <expr> wraps the inner spec in a Vega-Lite facet operator
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7, 'Adelie'), (39.5, 17.4, 'Adelie'), (44.0, 18.0, 'Gentoo')) AS t(bill_len, bill_dep, species);
+
+# Single-layer faceted: data stays top-level, mark/encoding move into `spec`
+# alongside the `facet` definition.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"field":"facet","type":"nominal"},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet FROM penguins'}
+
+# Bar's GROUP BY extends to (x, facet) so each facet partition keeps its own ordinal x bins.
+query TT
+VISUALIZE species AS x, bill_dep AS y FROM penguins DRAW bar FACET BY species
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"field":"facet","type":"nominal"},"spec":{"mark":"bar","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT x, facet, SUM(y) AS y FROM (SELECT species AS x, bill_dep AS y, species AS facet FROM penguins) GROUP BY x, facet ORDER BY x'}
+
+# Multi-layer faceted: data:per-layer; the layer:[...] array sits inside the facet operator's `spec`.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW line FACET BY species
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","facet":{"field":"facet","type":"nominal"},"spec":{"layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}]}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet FROM penguins', layer_1='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y, species AS facet FROM penguins) ORDER BY x'}
+
+# Histogram + facet: bin/count happen inside each facet partition.
+query TT
+VISUALIZE bill_len AS x FROM penguins DRAW histogram FACET BY species
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"field":"facet","type":"nominal"},"spec":{"mark":"bar","encoding":{"x":{"field":"x","type":"quantitative","bin":true},"y":{"aggregate":"count","type":"quantitative"}}}}	{layer_0='SELECT bill_len AS x, species AS facet FROM penguins'}
+
+# Missing expression after FACET BY — clean error.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY
+----
+Expected expression after 'FACET BY'
+
+# FACET without BY — clean error.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET species
+----
+Expected 'BY'
+
+# Phase 9: explicit ROWS layout — vertical stack via Vega-Lite "facet":{"row":...}.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species ROWS
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"row":{"field":"facet","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet FROM penguins'}
+
+# Phase 9: explicit COLS layout — horizontal stack via "facet":{"column":...}.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species COLS
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"column":{"field":"facet","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet FROM penguins'}
+
+# Layout composes with SCALE — ROWS layout retained, scale injected into the matching channel.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point FACET BY species ROWS SCALE color TO viridis
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"row":{"field":"facet","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color, species AS facet FROM penguins'}
+
+# `ROWS` / `COLS` are reserved tokens after `FACET BY`. Bare `FACET BY ROWS` (no expression) errors.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY ROWS
+----
+Expected expression after 'FACET BY'

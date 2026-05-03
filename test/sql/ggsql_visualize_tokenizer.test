@@ -1,0 +1,68 @@
+# name: test/sql/ggsql_visualize_tokenizer.test
+# description: Phase 5 — paren-aware and quote-aware tokenizer
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7, 'Adelie'), (39.5, 17.4, 'Adelie'), (44.0, 18.0, 'Gentoo')) AS t(bill_len, bill_dep, species);
+
+# Top-level comma inside parens is no longer a boundary — `coalesce(a, b)` parses
+# as a single expression. Closes the phase-4c documented limitation.
+query TT
+VISUALIZE coalesce(bill_len, bill_dep) AS x, bill_dep AS y FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT coalesce(bill_len, bill_dep) AS x, bill_dep AS y FROM penguins'}
+
+# Nested parens with internal commas at multiple depths.
+query TT
+VISUALIZE log(coalesce(bill_len, bill_dep)) AS x, bill_dep AS y FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT log(coalesce(bill_len, bill_dep)) AS x, bill_dep AS y FROM penguins'}
+
+# Subquery with internal FROM is protected by the paren-depth check — the inner
+# FROM no longer terminates the boundary scan.
+query TT
+VISUALIZE bill_len AS x, (SELECT max(bill_dep) FROM penguins) AS y FROM penguins DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, (SELECT max(bill_dep) FROM penguins) AS y FROM penguins'}
+
+# Quoted identifier with internal space.
+statement ok
+CREATE TABLE q AS SELECT 1 AS "my col", 2 AS y;
+
+query TT
+VISUALIZE "my col" AS x, y AS y FROM q DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT "my col" AS x, y AS y FROM q'}
+
+# String literal with internal space (no longer split on whitespace inside quotes).
+query TT
+VISUALIZE 'big size' AS x, y AS y FROM q DRAW point
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT \'big size\' AS x, y AS y FROM q'}
+
+# Multi-layer + paren-aware expressions.
+query TT
+VISUALIZE coalesce(bill_len, 0) AS x, bill_dep AS y FROM penguins DRAW point DRAW line
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}]}	{layer_0='SELECT coalesce(bill_len, 0) AS x, bill_dep AS y FROM penguins', layer_1='SELECT * FROM (SELECT coalesce(bill_len, 0) AS x, bill_dep AS y FROM penguins) ORDER BY x'}
+
+# Unbalanced opening paren produces a clear tokenizer error.
+statement error
+VISUALIZE log( AS x FROM penguins DRAW point
+----
+Unbalanced parentheses in input
+
+# Unterminated string literal produces a clear error naming the missing quote.
+statement error
+VISUALIZE 'open AS x FROM penguins DRAW point
+----
+Unterminated string literal or quoted identifier
+
+# Unterminated quoted identifier likewise.
+statement error
+VISUALIZE "open AS x FROM penguins DRAW point
+----
+Unterminated string literal or quoted identifier
