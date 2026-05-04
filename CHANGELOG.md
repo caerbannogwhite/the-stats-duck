@@ -10,8 +10,23 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+## [0.2.0-bring-out-your-dead] - 2026-05-03
+
 ### Added
 
+- **ggsql — Grammar of Graphics for SQL.** New `VISUALIZE … FROM <table> DRAW <mark>`
+  parser extension that compiles at plan time into a Vega-Lite v5 spec plus one SQL
+  string per layer, returned as `(spec VARCHAR, layer_sqls MAP(VARCHAR, VARCHAR))`.
+  Clients (e.g. Bedevere Wise in DuckDB-WASM) execute each layer's SQL and feed Arrow
+  rows into vega-embed via the `datasets` API — no server-side rendering. Supports
+  11 marks (`point`, `line`, `bar`, `histogram`, `text`, `area`, `rule`, `tick`,
+  `errorbar`, `errorband`, `boxplot`), 12 aesthetic channels, multi-layer overlays
+  (`DRAW point DRAW line`), `FACET BY <expr> [ROWS|COLS]`, `SCALE` clauses
+  (`TO <scheme>` for color schemes, `ZERO true|false`, `DOMAIN <lo> <hi>`),
+  type-annotated aesthetics (`year AS color:ordinal`), and SQL expressions in
+  mappings (`bill_len * 2 AS x`, `coalesce(a, b) AS x`). Marks are registered
+  through a catalog-mediated registry (`ggsql_mark_v1_<name>` scalar functions),
+  so other extensions can ship custom marks without modifying stats_duck.
 - `COPY tbl TO 'file.xpt'` — write SAS Transport (XPT v5) files via ReadStat.
   Supports BOOLEAN, all integer/float/decimal types, VARCHAR, DATE, TIMESTAMP, and
   TIME columns. Numeric NULLs round-trip as SAS system-missing; VARCHAR NULLs
@@ -88,4 +103,5 @@ First public release.
 - `linux_amd64_musl` is excluded due to a known upstream issue in the v1.2.2 extension-ci-tools Alpine Dockerfile.
 - WASM binaries served via GitHub Pages at `https://caerbannogwhite.github.io/the-stats-duck`.
 
+[0.2.0-bring-out-your-dead]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.2.0
 [0.1.0-mortician]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.1.0
