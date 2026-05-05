@@ -358,6 +358,54 @@ git submodule update --init --recursive
 make release
 ```
 
+### Building with MinGW
+
+DuckDB extensions are tagged at build time with a *platform string* that the
+host process uses to validate ABI compatibility before loading. The default
+`make release` on Windows uses MSVC and stamps `windows_amd64`. A consumer
+DuckDB built with mingw-w64 (e.g. via zig's bundled clang + mingw-w64
+sysroot, or the rtools/MSYS2 toolchains) will refuse to load that binary
+with:
+
+```
+Failed to load 'stats_duck.duckdb_extension'. The file was built for the
+platform 'windows_amd64', but we can only load extensions built for
+platform 'windows_amd64_mingw'.
+```
+
+For those hosts, build with:
+
+```bash
+make mingw_release
+```
+
+This drives a CMake build with `-G "MinGW Makefiles"`, sets `CC=gcc`,
+`CXX=g++`, and stamps `DUCKDB_EXPLICIT_PLATFORM=windows_amd64_mingw`. The
+binary lands at:
+
+```
+build/mingw_release/extension/stats_duck/stats_duck.duckdb_extension
+build/mingw_release/repository/<duckdb_version>/windows_amd64_mingw/stats_duck.duckdb_extension
+```
+
+The MSVC `windows_amd64` binary at `build/release/...` is left alone — both
+flavors can coexist on disk and ship side by side. CI already produces both
+on every release; this target is for local-only verification or for
+distributing to consumers that bundle their own DuckDB and need an exact
+ABI match.
+
+**Toolchain requirements.** Anything ABI-compatible with `x86_64-w64-mingw32`
+works. Tested with TDM-GCC 10.3 and MSYS2's `mingw-w64-x86_64-toolchain`. On
+TDM-GCC the Makefile passes `-D_WIN32_WINNT=0x0A00` because TDM-GCC's default
+predates the Vista-era APIs DuckDB uses; MSYS2 already defaults to that
+value, where the flag is harmless.
+
+**vcpkg is intentionally not used** for the MinGW build — its Windows
+default triplet is MSVC and would not match the toolchain. zlib (the only
+external dep, used for SPSS `.zsav` read/write) becomes optional and
+gracefully degrades if absent (see `CMakeLists.txt:97`); install zlib via
+your mingw package manager if you need `.zsav` support.
+
 ## Testing
 
 ```bash

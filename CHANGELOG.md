@@ -35,6 +35,15 @@ that name is preserved across releases for backward compatibility.
   without scanning the data. Useful for inspecting SAS / SPSS / Stata files
   before importing, and for verifying that column comments propagated through
   to ReadStat variable labels on export.
+- `make mingw_release` — local build target that produces a
+  `windows_amd64_mingw`-stamped `stats_duck.duckdb_extension` for loading
+  into mingw-built DuckDB hosts (the zig-bundled DuckDB inside `sassy`,
+  DuckDB's own `duckdb_cli-windows-amd64-mingw.zip` releases, etc.). The
+  default `make release` on Windows still produces an MSVC-tagged
+  `windows_amd64` binary; both can coexist. CI already ships both flavors
+  via extension-ci-tools' standard distribution matrix — this target is
+  for local verification and side-loading. See README's "Building with
+  MinGW" section.
 
 ## [0.2.0-bring-out-your-dead] - 2026-05-03
 
