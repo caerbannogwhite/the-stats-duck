@@ -10,6 +10,15 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+### Added
+
+- `COPY tbl TO 'file.por'` — write SPSS Portable (POR) files via ReadStat. Same
+  type and NULL semantics as the SAV writer, but with XPT-style strict
+  column-name rules (≤ 8 chars uppercase, A-Z 0-9 _) and no compression
+  (POR is plain ASCII). Optional `LABEL` option. POR is the legacy
+  cross-platform sibling of SAV, still encountered in some government and
+  academic data archives. The reader has supported `.por` since v0.1.0.
+
 ## [0.2.0-bring-out-your-dead] - 2026-05-03
 
 ### Added

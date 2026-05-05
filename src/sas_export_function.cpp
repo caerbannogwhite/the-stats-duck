@@ -21,21 +21,31 @@ extern "C" {
 
 namespace duckdb {
 
-enum class SasFormat { XPT, SAS7BDAT, SAV };
+enum class SasFormat { XPT, SAS7BDAT, SAV, POR };
+
+// SAV and POR share SPSS-side semantics: SPSS epoch (1582-10-14), SPSS format
+// strings (DATE11/DATETIME20/TIME8), spss_format_for_variable() handling.
+static inline bool IsSpssFamily(SasFormat f) {
+	return f == SasFormat::SAV || f == SasFormat::POR;
+}
 
 // ─── Per-format column-name validation ─────────────────────────────────────────
-// XPT v5: ≤ 8 chars, uppercased, ASCII alphanumeric or underscore, must start
-// with a letter or underscore. Names are uppercased before validation —
-// silent truncation would create silent collisions on round-trip.
+// XPT v5 / POR: ≤ 8 chars, uppercased, ASCII alphanumeric or underscore, must
+// start with a letter or underscore. Names are uppercased before validation —
+// silent truncation would create silent collisions on round-trip. (POR allows
+// '.', '@', '#', '$' too, but we keep the stricter A-Z 0-9 _ subset for
+// consistency with XPT.)
 // SAS7BDAT / SAV: ≤ 32 chars, otherwise the same character rules. Case is
 // preserved (real SAS is case-insensitive but stores the user's casing; SPSS
 // is case-sensitive in modern versions).
 
 static string ValidateColumnName(const string &name, SasFormat format, const char *role) {
-	const size_t max_len = (format == SasFormat::XPT) ? 8 : 32;
-	const char *format_label = format == SasFormat::XPT     ? "XPT v5"
+	const bool short_name_format = format == SasFormat::XPT || format == SasFormat::POR;
+	const size_t max_len = short_name_format ? 8 : 32;
+	const char *format_label = format == SasFormat::XPT        ? "XPT v5"
 	                           : format == SasFormat::SAS7BDAT ? "SAS7BDAT"
-	                                                          : "SAV";
+	                           : format == SasFormat::SAV      ? "SAV"
+	                                                          : "POR";
 
 	if (name.empty()) {
 		throw BinderException("Empty %s not allowed in %s export", role, format_label);
@@ -44,7 +54,7 @@ static string ValidateColumnName(const string &name, SasFormat format, const cha
 		throw BinderException("%s '%s' is too long for %s (max %llu chars). Rename in your SELECT.", role, name,
 		                      format_label, static_cast<uint64_t>(max_len));
 	}
-	string out = (format == SasFormat::XPT) ? StringUtil::Upper(name) : name;
+	string out = short_name_format ? StringUtil::Upper(name) : name;
 	for (char c : out) {
 		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
 		if (!ok) {
@@ -70,7 +80,7 @@ struct ColumnSpec {
 };
 
 static void MapDuckDBType(const LogicalType &dt, SasFormat fmt, ColumnSpec &spec) {
-	const bool is_spss = fmt == SasFormat::SAV;
+	const bool is_spss = IsSpssFamily(fmt);
 
 	switch (dt.id()) {
 	case LogicalTypeId::BOOLEAN:
@@ -178,7 +188,10 @@ static SasFormat FormatFromInfo(const CopyInfo &info) {
 	if (fmt == "sav") {
 		return SasFormat::SAV;
 	}
-	throw BinderException("Unknown stats_duck export format '%s' (expected 'xpt', 'sas7bdat', or 'sav')",
+	if (fmt == "por") {
+		return SasFormat::POR;
+	}
+	throw BinderException("Unknown stats_duck export format '%s' (expected 'xpt', 'sas7bdat', 'sav', or 'por')",
 	                      info.format);
 }
 
@@ -190,6 +203,8 @@ static const char *FormatLabel(SasFormat f) {
 		return "SAS7BDAT";
 	case SasFormat::SAV:
 		return "SAV";
+	case SasFormat::POR:
+		return "POR";
 	}
 	return "?";
 }
@@ -236,6 +251,8 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 			table_name_user_provided = true;
 		} else if (loption == "compression") {
 			if (fmt != SasFormat::SAS7BDAT && fmt != SasFormat::SAV) {
+				// POR is text-based; SPSS's spec defines no compression for it.
+				// XPT also has no compression in either v5 or v8.
 				throw BinderException("COMPRESSION option is only meaningful for SAS7BDAT and SAV export, not %s",
 				                      fmt_label);
 			}
@@ -361,7 +378,7 @@ static ssize_t SasExportDataWriter(const void *bytes, size_t len, void *ctx) {
 
 static void InsertValue(readstat_writer_t *writer, const readstat_variable_t *var, const ColumnSpec &spec,
                         SasFormat sas_format, const Vector &vec_p, idx_t row, UnifiedVectorFormat &fmt) {
-	const int32_t epoch_offset = sas_format == SasFormat::SAV ? SPSS_EPOCH_OFFSET : SAS_EPOCH_OFFSET;
+	const int32_t epoch_offset = IsSpssFamily(sas_format) ? SPSS_EPOCH_OFFSET : SAS_EPOCH_OFFSET;
 	auto idx = fmt.sel->get_index(row);
 	if (!fmt.validity.RowIsValid(idx)) {
 		readstat_insert_missing_value(writer, var);
@@ -436,7 +453,7 @@ static void InsertValue(readstat_writer_t *writer, const readstat_variable_t *va
 		// then × 86400 to convert days→seconds).
 		auto days = UnifiedVectorFormat::GetData<date_t>(fmt)[idx].days;
 		double offset_days = static_cast<double>(days - epoch_offset);
-		double v = sas_format == SasFormat::SAV ? offset_days * 86400.0 : offset_days;
+		double v = IsSpssFamily(sas_format) ? offset_days * 86400.0 : offset_days;
 		readstat_insert_double_value(writer, var, v);
 		break;
 	}
@@ -508,6 +525,9 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 		break;
 	case SasFormat::SAV:
 		err = readstat_begin_writing_sav(writer, gstate.file_handle.get(), row_count);
+		break;
+	case SasFormat::POR:
+		err = readstat_begin_writing_por(writer, gstate.file_handle.get(), row_count);
 		break;
 	}
 	if (err != READSTAT_OK) {
@@ -598,6 +618,15 @@ void RegisterSasExport(ExtensionLoader &loader) {
 	WireCopyFunction(sav);
 	sav.extension = "sav";
 	loader.RegisterFunction(sav);
+
+	// SPSS .por — Portable file format. ASCII-encoded sibling of SAV designed
+	// for cross-platform interchange in pre-Unicode SPSS workflows. Strict
+	// XPT-style 8-char uppercase column names and no compression. Variable
+	// labels are written via the same readstat_variable_set_label path.
+	CopyFunction por("por");
+	WireCopyFunction(por);
+	por.extension = "por";
+	loader.RegisterFunction(por);
 }
 
 } // namespace duckdb
