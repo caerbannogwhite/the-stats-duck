@@ -406,6 +406,44 @@ external dep, used for SPSS `.zsav` read/write) becomes optional and
 gracefully degrades if absent (see `CMakeLists.txt:97`); install zlib via
 your mingw package manager if you need `.zsav` support.
 
+### Building with zig as the C++ toolchain (matches sassy)
+
+DuckDB's platform string `windows_amd64_mingw` does not distinguish which C++
+runtime the binary is linked against. Two `windows_amd64_mingw` extensions can
+both pass the platform check on load and then segfault during function
+registration if their `std::map` / `std::shared_ptr` / etc. layouts differ —
+which they do across **libstdc++** (GNU's STL, what mingw-w64 GCC uses) and
+**libc++** (LLVM's STL, what zig's bundled clang uses with `link_libcpp`).
+
+The downstream [sassy](https://github.com/caerbannogwhite/sassy) SAS
+interpreter builds DuckDB with zig + `link_libcpp = true`, so its DuckDB
+links against libc++. The `make mingw_release` target above produces a
+libstdc++-linked binary and is *not* compatible — it'll segfault inside
+sassy. Use the zig variant instead:
+
+```bash
+make zig_mingw_release
+```
+
+This drives the same CMake configuration as `mingw_release` but routes
+`CC` / `CXX` through `scripts/zig-shims/zig-cc.cmd` / `zig-cxx.cmd`, which
+forward to `zig cc -target x86_64-windows-gnu` and
+`zig c++ -target x86_64-windows-gnu`. Output:
+
+```
+build/zig_mingw_release/extension/stats_duck/stats_duck.duckdb_extension
+build/zig_mingw_release/repository/<duckdb_version>/windows_amd64_mingw/stats_duck.duckdb_extension
+```
+
+Same platform stamp (`windows_amd64_mingw`), different C++ runtime. On a
+correctly-built artifact, `objdump -p stats_duck.duckdb_extension | grep DLL`
+shows only Windows system DLLs (`KERNEL32.dll`, `api-ms-win-crt-*`) — no
+`libstdc++-6.dll` or `libgcc_s_seh-1.dll`. If any GNU runtime DLL appears,
+the build slipped back to GCC.
+
+**Requirements.** zig 0.16+ on `PATH`. Tested with the `zig.zig`
+WinGet-installed copy.
+
 ## Testing
 
 ```bash
