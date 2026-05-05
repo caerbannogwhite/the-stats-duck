@@ -175,3 +175,49 @@ statement error
 COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.xpt' (TABLE_NAME 'this_is_too_long')
 ----
 too long for XPT v5
+
+# ─── XPT v8 (32-char names) ────────────────────────────────────────────────────
+# Reader auto-detects v5 vs v8 from the file header (longname[32] subrecord),
+# so writing as v8 round-trips through this extension's read_stat() seamlessly.
+
+# Long column name accepted with VERSION 8.
+statement ok
+COPY (SELECT 1 AS this_is_a_long_column_name_v8x) TO '__TEST_DIR__/v8.xpt' (VERSION 8)
+
+query I
+SELECT CAST(THIS_IS_A_LONG_COLUMN_NAME_V8X AS INTEGER) FROM read_stat('__TEST_DIR__/v8.xpt')
+----
+1
+
+# Long TABLE_NAME accepted under VERSION 8.
+statement ok
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/v8name.xpt' (VERSION 8, TABLE_NAME 'A_LONGER_DATASET_NAME')
+
+query I
+SELECT CAST(X AS INTEGER) FROM read_stat('__TEST_DIR__/v8name.xpt')
+----
+1
+
+# v5 (default) still rejects long names.
+statement error
+COPY (SELECT 1 AS this_is_a_long_column_name_v8x) TO '__TEST_DIR__/v5fail.xpt'
+----
+too long for XPT v5
+
+# > 32 chars rejected even under v8.
+statement error
+COPY (SELECT 1 AS a_thirty_three_character_xpt_v8name) TO '__TEST_DIR__/v8fail.xpt' (VERSION 8)
+----
+too long for XPT v8
+
+# Bogus VERSION rejected.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/badver.xpt' (VERSION 9)
+----
+XPT VERSION must be 5 or 8
+
+# VERSION on non-XPT format rejected.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/badfmt.sav' (VERSION 8)
+----
+VERSION option is only meaningful for XPT

@@ -18,6 +18,11 @@ that name is preserved across releases for backward compatibility.
   (POR is plain ASCII). Optional `LABEL` option. POR is the legacy
   cross-platform sibling of SAV, still encountered in some government and
   academic data archives. The reader has supported `.por` since v0.1.0.
+- XPT export now accepts a `VERSION` option (5 or 8). Version 5 is the default
+  (preserves backwards compatibility with v0.2.0). Version 8 lifts the column-
+  name limit to 32 chars and raises the dataset name limit to 32 chars. v8
+  files round-trip through `read_stat()`, pyreadstat, haven, and R; some
+  legacy SAS toolchains still expect v5, hence the conservative default.
 
 ## [0.2.0-bring-out-your-dead] - 2026-05-03
 

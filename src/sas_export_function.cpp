@@ -35,17 +35,41 @@ static inline bool IsSpssFamily(SasFormat f) {
 // silent truncation would create silent collisions on round-trip. (POR allows
 // '.', '@', '#', '$' too, but we keep the stricter A-Z 0-9 _ subset for
 // consistency with XPT.)
-// SAS7BDAT / SAV: ≤ 32 chars, otherwise the same character rules. Case is
-// preserved (real SAS is case-insensitive but stores the user's casing; SPSS
-// is case-sensitive in modern versions).
+// XPT v8 / SAS7BDAT / SAV: ≤ 32 chars, otherwise the same character rules. XPT
+// v8 still uppercases (XPT-family files are uppercase by convention); SAS7BDAT
+// and SAV preserve the user's casing.
 
-static string ValidateColumnName(const string &name, SasFormat format, const char *role) {
-	const bool short_name_format = format == SasFormat::XPT || format == SasFormat::POR;
-	const size_t max_len = short_name_format ? 8 : 32;
-	const char *format_label = format == SasFormat::XPT        ? "XPT v5"
-	                           : format == SasFormat::SAS7BDAT ? "SAS7BDAT"
-	                           : format == SasFormat::SAV      ? "SAV"
-	                                                          : "POR";
+static size_t MaxNameLen(SasFormat format, uint8_t xpt_version) {
+	switch (format) {
+	case SasFormat::XPT:
+		return xpt_version == 8 ? 32 : 8;
+	case SasFormat::POR:
+		return 8;
+	case SasFormat::SAS7BDAT:
+	case SasFormat::SAV:
+		return 32;
+	}
+	return 8;
+}
+
+static const char *FormatLabelWithVersion(SasFormat format, uint8_t xpt_version) {
+	switch (format) {
+	case SasFormat::XPT:
+		return xpt_version == 8 ? "XPT v8" : "XPT v5";
+	case SasFormat::SAS7BDAT:
+		return "SAS7BDAT";
+	case SasFormat::SAV:
+		return "SAV";
+	case SasFormat::POR:
+		return "POR";
+	}
+	return "?";
+}
+
+static string ValidateColumnName(const string &name, SasFormat format, const char *role, uint8_t xpt_version = 5) {
+	const bool uppercase = format == SasFormat::XPT || format == SasFormat::POR;
+	const size_t max_len = MaxNameLen(format, xpt_version);
+	const char *format_label = FormatLabelWithVersion(format, xpt_version);
 
 	if (name.empty()) {
 		throw BinderException("Empty %s not allowed in %s export", role, format_label);
@@ -54,7 +78,7 @@ static string ValidateColumnName(const string &name, SasFormat format, const cha
 		throw BinderException("%s '%s' is too long for %s (max %llu chars). Rename in your SELECT.", role, name,
 		                      format_label, static_cast<uint64_t>(max_len));
 	}
-	string out = short_name_format ? StringUtil::Upper(name) : name;
+	string out = uppercase ? StringUtil::Upper(name) : name;
 	for (char c : out) {
 		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
 		if (!ok) {
@@ -136,14 +160,16 @@ static void MapDuckDBType(const LogicalType &dt, SasFormat fmt, ColumnSpec &spec
 
 struct SasExportBindData : public FunctionData {
 	SasFormat format = SasFormat::XPT;
+	uint8_t xpt_version = 5;                                    // XPT only — 5 (default) or 8
 	string label;
 	string table_name;                                          // XPT only
-	readstat_compress_t compression = READSTAT_COMPRESS_NONE;   // SAS7BDAT only
+	readstat_compress_t compression = READSTAT_COMPRESS_NONE;   // SAS7BDAT and SAV only
 	vector<ColumnSpec> columns;
 
 	unique_ptr<FunctionData> Copy() const override {
 		auto c = make_uniq<SasExportBindData>();
 		c->format = format;
+		c->xpt_version = xpt_version;
 		c->label = label;
 		c->table_name = table_name;
 		c->compression = compression;
@@ -161,8 +187,8 @@ struct SasExportBindData : public FunctionData {
 				return false;
 			}
 		}
-		return format == other.format && label == other.label && table_name == other.table_name &&
-		       compression == other.compression;
+		return format == other.format && xpt_version == other.xpt_version && label == other.label &&
+		       table_name == other.table_name && compression == other.compression;
 	}
 };
 
@@ -218,6 +244,8 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 
 	// XPT-only: derive a default internal dataset name from the path basename.
 	// SAS7BDAT ignores readstat_writer_set_table_name, so we only build it for XPT.
+	// Truncation length follows xpt_version (set below from the VERSION option,
+	// defaulting to 5).
 	string xpt_base;
 	if (fmt == SasFormat::XPT) {
 		auto path = input.info.file_path;
@@ -230,9 +258,6 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 		if (xpt_base.empty()) {
 			xpt_base = "DATASET";
 		}
-		if (xpt_base.size() > 8) {
-			xpt_base = xpt_base.substr(0, 8);
-		}
 	}
 
 	bool table_name_user_provided = false;
@@ -243,6 +268,15 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 		}
 		if (loption == "label") {
 			bind_data->label = option.second[0].ToString();
+		} else if (loption == "version") {
+			if (fmt != SasFormat::XPT) {
+				throw BinderException("VERSION option is only meaningful for XPT export, not %s", fmt_label);
+			}
+			auto v = option.second[0].GetValue<int64_t>();
+			if (v != 5 && v != 8) {
+				throw BinderException("XPT VERSION must be 5 or 8, got %lld", static_cast<long long>(v));
+			}
+			bind_data->xpt_version = static_cast<uint8_t>(v);
 		} else if (loption == "table_name") {
 			if (fmt != SasFormat::XPT) {
 				throw BinderException("TABLE_NAME option is only meaningful for XPT export, not %s", fmt_label);
@@ -270,13 +304,22 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 	}
 
 	if (fmt == SasFormat::XPT) {
+		// Truncate auto-derived path basenames to the version-appropriate width
+		// before validation. User-supplied TABLE_NAME is left intact and must
+		// validate as-is.
+		if (!table_name_user_provided) {
+			auto cap = MaxNameLen(SasFormat::XPT, bind_data->xpt_version);
+			if (xpt_base.size() > cap) {
+				xpt_base = xpt_base.substr(0, cap);
+			}
+		}
 		try {
-			bind_data->table_name = ValidateColumnName(xpt_base, fmt, "TABLE_NAME");
+			bind_data->table_name = ValidateColumnName(xpt_base, fmt, "TABLE_NAME", bind_data->xpt_version);
 		} catch (const BinderException &) {
 			if (table_name_user_provided) {
 				throw;
 			}
-			// Auto-derived name from path didn't fit XPT v5; fall back to "DATASET".
+			// Auto-derived name from path didn't validate; fall back to "DATASET".
 			bind_data->table_name = "DATASET";
 		}
 	}
@@ -287,7 +330,7 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 		spec.original_name = names[i];
 		spec.duckdb_type = sql_types[i];
 		MapDuckDBType(sql_types[i], fmt, spec);
-		spec.mangled_name = ValidateColumnName(names[i], fmt, "column name");
+		spec.mangled_name = ValidateColumnName(names[i], fmt, "column name", bind_data->xpt_version);
 		bind_data->columns.push_back(std::move(spec));
 	}
 
@@ -483,9 +526,11 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 	readstat_set_data_writer(writer, SasExportDataWriter);
 
 	if (bind_data.format == SasFormat::XPT) {
-		// XPT v5 — most universally readable XPT version. v8 (longer names, wider
-		// strings) is a future phase.
-		readstat_writer_set_file_format_version(writer, 5);
+		// XPT v5 (default) — most universally readable. v8 lifts the column-name
+		// width to 32 chars and is read transparently by ReadStat-family readers
+		// (this extension's read_stat(), pyreadstat, haven, R), but some legacy
+		// SAS toolchains still expect v5.
+		readstat_writer_set_file_format_version(writer, bind_data.xpt_version);
 		if (!bind_data.table_name.empty()) {
 			readstat_writer_set_table_name(writer, bind_data.table_name.c_str());
 		}
