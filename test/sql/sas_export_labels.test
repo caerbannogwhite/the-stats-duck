@@ -1,0 +1,148 @@
+# name: test/sql/sas_export_labels.test
+# description: Variable labels from DuckDB column comments — for COPY tbl TO ...
+#              of any of XPT/SAS7BDAT/SAV/POR. Verified via read_stat_metadata().
+# group: [stats_duck]
+
+require stats_duck
+
+# ─── read_stat_metadata smoke test on a fixture file ──────────────────────────
+
+query TT
+SELECT column_name, type FROM read_stat_metadata('./test/data/sample.sas7bdat') ORDER BY column_name
+----
+dtime	DOUBLE
+mychar	STRING
+mydate	DOUBLE
+mylabl	DOUBLE
+mynum	DOUBLE
+myord	DOUBLE
+mytime	DOUBLE
+
+# Replacement scan does not apply to read_stat_metadata — explicit form only.
+statement error
+SELECT * FROM read_stat_metadata('./test/data/missing_file.sas7bdat')
+----
+Failed to read metadata
+
+# ─── Column comments → SAV variable labels ────────────────────────────────────
+
+statement ok
+CREATE TABLE penguins(species VARCHAR, bill_len_mm DOUBLE, body_mass_g INTEGER);
+
+statement ok
+COMMENT ON COLUMN penguins.species IS 'Penguin species (Adelie, Gentoo, Chinstrap)'
+
+statement ok
+COMMENT ON COLUMN penguins.bill_len_mm IS 'Bill length in millimeters'
+
+statement ok
+COMMENT ON COLUMN penguins.body_mass_g IS 'Body mass in grams'
+
+statement ok
+INSERT INTO penguins VALUES ('Adelie', 39.1, 3750), ('Gentoo', 50.0, 5000);
+
+statement ok
+COPY penguins TO '__TEST_DIR__/penguins.sav';
+
+query TT
+SELECT column_name, label FROM read_stat_metadata('__TEST_DIR__/penguins.sav') ORDER BY column_name
+----
+bill_len_mm	Bill length in millimeters
+body_mass_g	Body mass in grams
+species	Penguin species (Adelie, Gentoo, Chinstrap)
+
+# ─── Same comments survive SAS7BDAT round-trip ────────────────────────────────
+
+statement ok
+COPY penguins TO '__TEST_DIR__/penguins.sas7bdat';
+
+query TT
+SELECT column_name, label FROM read_stat_metadata('__TEST_DIR__/penguins.sas7bdat') ORDER BY column_name
+----
+bill_len_mm	Bill length in millimeters
+body_mass_g	Body mass in grams
+species	Penguin species (Adelie, Gentoo, Chinstrap)
+
+# ─── XPT v5 — uppercase 8-char names, labels still ride along (≤ 40 chars) ───
+
+statement ok
+CREATE TABLE shorty(s VARCHAR, x DOUBLE);
+
+statement ok
+COMMENT ON COLUMN shorty.s IS 'Species code'
+
+statement ok
+COMMENT ON COLUMN shorty.x IS 'Bill length'
+
+statement ok
+COPY shorty TO '__TEST_DIR__/shorty.xpt';
+
+query TT
+SELECT column_name, label FROM read_stat_metadata('__TEST_DIR__/shorty.xpt') ORDER BY column_name
+----
+S	Species code
+X	Bill length
+
+# ─── XPT v8 — long labels (> 40 chars) ride a long-label subrecord ────────────
+
+statement ok
+CREATE TABLE longlab(measurement DOUBLE);
+
+statement ok
+COMMENT ON COLUMN longlab.measurement IS 'A label that exceeds forty characters in length, exercising the LABELV8 subrecord path'
+
+statement ok
+COPY longlab TO '__TEST_DIR__/longlab.xpt' (VERSION 8);
+
+query TT
+SELECT column_name, label FROM read_stat_metadata('__TEST_DIR__/longlab.xpt')
+----
+MEASUREMENT	A label that exceeds forty characters in length, exercising the LABELV8 subrecord path
+
+# ─── POR labels survive too ──────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE porlab(s VARCHAR, n INTEGER);
+
+statement ok
+COMMENT ON COLUMN porlab.s IS 'Subject code'
+
+statement ok
+COMMENT ON COLUMN porlab.n IS 'Visit number'
+
+statement ok
+COPY porlab TO '__TEST_DIR__/porlab.por';
+
+query TT
+SELECT column_name, label FROM read_stat_metadata('__TEST_DIR__/porlab.por') ORDER BY column_name
+----
+N	Visit number
+S	Subject code
+
+# ─── COPY (subquery) form has no source-table comments → empty labels ─────────
+
+statement ok
+COPY (SELECT 1 AS x, 2 AS y) TO '__TEST_DIR__/no_comments.sav';
+
+query TT
+SELECT column_name, label FROM read_stat_metadata('__TEST_DIR__/no_comments.sav') ORDER BY column_name
+----
+x	(empty)
+y	(empty)
+
+# ─── Partial comment coverage — uncommented columns get empty labels ─────────
+
+statement ok
+CREATE TABLE partial(a INTEGER, b INTEGER);
+
+statement ok
+COMMENT ON COLUMN partial.a IS 'Annotated';
+
+statement ok
+COPY partial TO '__TEST_DIR__/partial.sav';
+
+query TT
+SELECT column_name, label FROM read_stat_metadata('__TEST_DIR__/partial.sav') ORDER BY column_name
+----
+a	Annotated
+b	(empty)

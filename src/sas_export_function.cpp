@@ -14,6 +14,10 @@
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/hugeint.hpp"
+#include "duckdb/catalog/catalog.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/parser/column_list.hpp"
+#include "duckdb/parser/column_definition.hpp"
 
 extern "C" {
 #include "readstat.h"
@@ -97,6 +101,7 @@ static string ValidateColumnName(const string &name, SasFormat format, const cha
 struct ColumnSpec {
 	string original_name;
 	string mangled_name;
+	string label; // ReadStat variable label — sourced from DuckDB column comments
 	LogicalType duckdb_type;
 	readstat_type_t rs_type;
 	string rs_format;     // SAS-style "DATE9." / SPSS-style "DATE11" / "" for non-temporal
@@ -334,6 +339,32 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 		bind_data->columns.push_back(std::move(spec));
 	}
 
+	// Pull DuckDB column comments into ReadStat variable labels for `COPY tbl TO ...`.
+	// CopyInfo.table is empty for `COPY (subquery) TO ...`, in which case there's
+	// no source-table catalog entry to consult and labels stay empty. This is
+	// intentional: a SELECT has no comment metadata of its own, only its source
+	// columns do, and reaching through the projection would mislabel computed
+	// columns.
+	if (!input.info.table.empty()) {
+		auto &catalog_name = input.info.catalog;
+		auto &schema_name = input.info.schema;
+		auto entry = Catalog::GetEntry<TableCatalogEntry>(context, catalog_name, schema_name, input.info.table,
+		                                                 OnEntryNotFound::RETURN_NULL);
+		if (entry) {
+			auto &columns = entry->GetColumns();
+			for (auto &spec : bind_data->columns) {
+				if (!columns.ColumnExists(spec.original_name)) {
+					continue;
+				}
+				const auto &col = columns.GetColumn(spec.original_name);
+				const Value &comment = col.Comment();
+				if (!comment.IsNull()) {
+					spec.label = comment.ToString();
+				}
+			}
+		}
+	}
+
 	return std::move(bind_data);
 }
 
@@ -556,6 +587,9 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 		vars[i] = readstat_add_variable(writer, col.mangled_name.c_str(), col.rs_type, storage_width);
 		if (!col.rs_format.empty()) {
 			readstat_variable_set_format(vars[i], col.rs_format.c_str());
+		}
+		if (!col.label.empty()) {
+			readstat_variable_set_label(vars[i], col.label.c_str());
 		}
 	}
 
