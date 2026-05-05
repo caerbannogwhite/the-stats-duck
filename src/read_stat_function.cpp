@@ -378,6 +378,159 @@ static unique_ptr<TableRef> ReadStatReplacementScan(ClientContext &context, Repl
 	return std::move(table_function);
 }
 
+// ─── read_stat_metadata: introspection table function ─────────────────────────
+// Returns one row per variable in the file with name / type / format / label,
+// without actually scanning the data. Useful for inspecting unfamiliar SAS /
+// SPSS / Stata files before importing, and for verifying that column comments
+// flowed through to ReadStat's variable labels on COPY ... TO 'file.{xpt,sas7bdat,sav,por}'.
+//
+// All four metadata fields come from the same readstat_metadata_handler /
+// readstat_variable_handler callbacks the reader already uses; we just collect
+// them into rows instead of populating a schema. ReadStat's row handler is
+// disabled via row_limit=0 — only header records are parsed.
+
+struct ReadStatMetadataRow {
+	string column_name;
+	string type;
+	string format;
+	string label;
+};
+
+struct ReadStatMetadataBindData : public FunctionData {
+	string path;
+	string format_name;
+	string encoding;
+	vector<ReadStatMetadataRow> rows;
+	string error_message;
+
+	unique_ptr<FunctionData> Copy() const override {
+		auto c = make_uniq<ReadStatMetadataBindData>();
+		c->path = path;
+		c->format_name = format_name;
+		c->encoding = encoding;
+		c->rows = rows;
+		return std::move(c);
+	}
+	bool Equals(const FunctionData &other_p) const override {
+		auto &other = other_p.Cast<ReadStatMetadataBindData>();
+		return path == other.path && format_name == other.format_name;
+	}
+};
+
+static const char *ReadStatTypeName(readstat_type_t t) {
+	switch (t) {
+	case READSTAT_TYPE_STRING:
+		return "STRING";
+	case READSTAT_TYPE_STRING_REF:
+		return "STRING_REF";
+	case READSTAT_TYPE_INT8:
+		return "INT8";
+	case READSTAT_TYPE_INT16:
+		return "INT16";
+	case READSTAT_TYPE_INT32:
+		return "INT32";
+	case READSTAT_TYPE_FLOAT:
+		return "FLOAT";
+	case READSTAT_TYPE_DOUBLE:
+		return "DOUBLE";
+	}
+	return "UNKNOWN";
+}
+
+static int MetadataVariableHandler(int index, readstat_variable_t *variable, const char *val_labels, void *ctx) {
+	auto &bind_data = *static_cast<ReadStatMetadataBindData *>(ctx);
+	const char *name = readstat_variable_get_name(variable);
+	const char *format = readstat_variable_get_format(variable);
+	const char *label = readstat_variable_get_label(variable);
+	auto type = readstat_variable_get_type(variable);
+
+	ReadStatMetadataRow row;
+	row.column_name = name ? name : "";
+	row.type = ReadStatTypeName(type);
+	row.format = format ? format : "";
+	row.label = label ? label : "";
+	bind_data.rows.push_back(std::move(row));
+	return READSTAT_HANDLER_OK;
+}
+
+static void MetadataErrorHandler(const char *error_message, void *ctx) {
+	auto &bind_data = *static_cast<ReadStatMetadataBindData *>(ctx);
+	bind_data.error_message = error_message ? error_message : "Unknown ReadStat error";
+}
+
+static unique_ptr<FunctionData> ReadStatMetadataBind(ClientContext &context, TableFunctionBindInput &input,
+                                                     vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<ReadStatMetadataBindData>();
+	bind_data->path = input.inputs[0].GetValue<string>();
+
+	for (auto &kv : input.named_parameters) {
+		if (kv.first == "format") {
+			bind_data->format_name = StringUtil::Lower(kv.second.GetValue<string>());
+		} else if (kv.first == "encoding") {
+			bind_data->encoding = kv.second.GetValue<string>();
+		}
+	}
+
+	if (bind_data->format_name.empty()) {
+		bind_data->format_name = DetectFormat(bind_data->path);
+	}
+	if (bind_data->format_name.empty()) {
+		throw InvalidInputException(
+		    "Cannot detect file format. Specify with: read_stat_metadata('file', format := 'sas7bdat')");
+	}
+
+	readstat_parser_t *parser = readstat_parser_init();
+	readstat_set_variable_handler(parser, MetadataVariableHandler);
+	readstat_set_error_handler(parser, MetadataErrorHandler);
+	readstat_set_row_limit(parser, 0);
+
+	DuckDBIOContext io_ctx;
+	io_ctx.fs = &FileSystem::GetFileSystem(context);
+	InstallDuckDBIO(parser, io_ctx);
+
+	if (!bind_data->encoding.empty()) {
+		readstat_set_file_character_encoding(parser, bind_data->encoding.c_str());
+	}
+
+	auto error = ParseWithFormat(parser, bind_data->path, bind_data->format_name, bind_data.get());
+	readstat_set_io_ctx(parser, nullptr);
+	readstat_parser_free(parser);
+
+	if (error != READSTAT_OK) {
+		string msg = bind_data->error_message.empty() ? readstat_error_message(error) : bind_data->error_message;
+		throw IOException("Failed to read metadata from '%s': %s", bind_data->path, msg);
+	}
+
+	names = {"column_name", "type", "format", "label"};
+	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR};
+	return std::move(bind_data);
+}
+
+struct ReadStatMetadataGlobalState : public GlobalTableFunctionState {
+	idx_t offset = 0;
+};
+
+static unique_ptr<GlobalTableFunctionState> ReadStatMetadataInitGlobal(ClientContext &, TableFunctionInitInput &) {
+	return make_uniq<ReadStatMetadataGlobalState>();
+}
+
+static void ReadStatMetadataExecute(ClientContext &, TableFunctionInput &input, DataChunk &output) {
+	auto &bind_data = input.bind_data->Cast<ReadStatMetadataBindData>();
+	auto &state = input.global_state->Cast<ReadStatMetadataGlobalState>();
+
+	idx_t available = bind_data.rows.size() - state.offset;
+	idx_t emit = std::min<idx_t>(available, STANDARD_VECTOR_SIZE);
+	for (idx_t i = 0; i < emit; i++) {
+		auto &row = bind_data.rows[state.offset + i];
+		output.SetValue(0, i, Value(row.column_name));
+		output.SetValue(1, i, Value(row.type));
+		output.SetValue(2, i, Value(row.format));
+		output.SetValue(3, i, Value(row.label));
+	}
+	output.SetCardinality(emit);
+	state.offset += emit;
+}
+
 // ─── Registration ───────────────────────────────────────────────────────────────
 
 void RegisterReadStat(ExtensionLoader &loader) {
@@ -385,6 +538,12 @@ void RegisterReadStat(ExtensionLoader &loader) {
 	func.named_parameters["format"] = LogicalType::VARCHAR;
 	func.named_parameters["encoding"] = LogicalType::VARCHAR;
 	loader.RegisterFunction(func);
+
+	TableFunction meta("read_stat_metadata", {LogicalType::VARCHAR}, ReadStatMetadataExecute, ReadStatMetadataBind,
+	                   ReadStatMetadataInitGlobal);
+	meta.named_parameters["format"] = LogicalType::VARCHAR;
+	meta.named_parameters["encoding"] = LogicalType::VARCHAR;
+	loader.RegisterFunction(meta);
 
 	auto &db = loader.GetDatabaseInstance();
 	auto &config = DBConfig::GetConfig(db);

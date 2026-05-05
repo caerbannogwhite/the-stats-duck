@@ -1,0 +1,117 @@
+# name: test/sql/sas_export_por.test
+# description: COPY ... TO '*.por' — SPSS Portable round-trip via ReadStat
+#              POR is the ASCII sibling of SAV. Strict XPT-style 8-char
+#              uppercase column-name rules. SPSS epoch and format strings.
+# group: [stats_duck]
+
+require stats_duck
+
+# ─── Numeric round-trip ────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE nums AS SELECT * FROM (VALUES (1, 1.5), (2, 2.5), (3, 3.5)) AS t(I, X);
+
+statement ok
+COPY nums TO '__TEST_DIR__/nums.por';
+
+query II
+SELECT CAST(I AS INTEGER), CAST(X * 10 AS INTEGER) FROM read_stat('__TEST_DIR__/nums.por') ORDER BY I
+----
+1	15
+2	25
+3	35
+
+# ─── Strings ───────────────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE strs AS SELECT * FROM (VALUES ('alice', 1), ('bob', 2)) AS t(NAME, ID);
+
+statement ok
+COPY strs TO '__TEST_DIR__/strs.por';
+
+query TI
+SELECT NAME, CAST(ID AS INTEGER) FROM read_stat('__TEST_DIR__/strs.por') ORDER BY ID
+----
+alice	1
+bob	2
+
+# ─── NULLs ─────────────────────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE nulls AS SELECT * FROM (VALUES (1, 'a'), (NULL, 'b')) AS t(N, S);
+
+statement ok
+COPY nulls TO '__TEST_DIR__/nulls.por';
+
+query IT
+SELECT CAST(N AS INTEGER), S FROM read_stat('__TEST_DIR__/nulls.por') ORDER BY N NULLS LAST
+----
+1	a
+NULL	b
+
+# ─── Temporal types — POR uses SPSS-native epoch (seconds since 1582-10-14) ──
+
+statement ok
+CREATE TABLE temporals AS SELECT * FROM (VALUES
+    (DATE '2024-01-15', TIMESTAMP '2024-01-15 10:30:45'),
+    (DATE '1960-01-01', TIMESTAMP '1960-01-01 00:00:00')
+) AS t(D, TS);
+
+statement ok
+COPY temporals TO '__TEST_DIR__/temporals.por';
+
+query TT
+SELECT D, TS FROM read_stat('__TEST_DIR__/temporals.por') ORDER BY D
+----
+1960-01-01	1960-01-01 00:00:00
+2024-01-15	2024-01-15 10:30:45
+
+# ─── COPY (subquery) form ─────────────────────────────────────────────────────
+
+statement ok
+COPY (SELECT 42 AS THE_ANSW, 'hello' AS GREETING) TO '__TEST_DIR__/inline.por';
+
+query IT
+SELECT CAST(THE_ANSW AS INTEGER), GREETING FROM read_stat('__TEST_DIR__/inline.por')
+----
+42	hello
+
+# ─── FORMAT override ──────────────────────────────────────────────────────────
+
+statement ok
+COPY (SELECT 7 AS X) TO '__TEST_DIR__/explicit.dat' (FORMAT 'por');
+
+query I
+SELECT CAST(X AS INTEGER) FROM read_stat('__TEST_DIR__/explicit.dat', format := 'por')
+----
+7
+
+# ─── 8-char uppercase column names enforced (XPT-style strictness) ────────────
+
+statement ok
+COPY (SELECT 1 AS abc) TO '__TEST_DIR__/lower.por';
+
+query I
+SELECT CAST(ABC AS INTEGER) FROM read_stat('__TEST_DIR__/lower.por')
+----
+1
+
+# ─── Negative cases ────────────────────────────────────────────────────────────
+
+# > 8-char column name rejected.
+statement error
+COPY (SELECT 1 AS this_name_too_long) TO '__TEST_DIR__/bad.por'
+----
+too long for POR
+
+# TABLE_NAME is XPT-only.
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.por' (TABLE_NAME 'NAME')
+----
+TABLE_NAME option is only meaningful for XPT export
+
+# COMPRESSION is rejected on POR (POR is ASCII, no compression in the spec).
+statement error
+COPY (SELECT 1 AS X) TO '__TEST_DIR__/bad.por' (COMPRESSION 'rows')
+----
+COMPRESSION option is only meaningful for SAS7BDAT and SAV

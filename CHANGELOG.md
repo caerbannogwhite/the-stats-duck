@@ -10,6 +10,32 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+### Added
+
+- `COPY tbl TO 'file.por'` — write SPSS Portable (POR) files via ReadStat. Same
+  type and NULL semantics as the SAV writer, but with XPT-style strict
+  column-name rules (≤ 8 chars uppercase, A-Z 0-9 _) and no compression
+  (POR is plain ASCII). Optional `LABEL` option. POR is the legacy
+  cross-platform sibling of SAV, still encountered in some government and
+  academic data archives. The reader has supported `.por` since v0.1.0.
+- XPT export now accepts a `VERSION` option (5 or 8). Version 5 is the default
+  (preserves backwards compatibility with v0.2.0). Version 8 lifts the column-
+  name limit to 32 chars and raises the dataset name limit to 32 chars. v8
+  files round-trip through `read_stat()`, pyreadstat, haven, and R; some
+  legacy SAS toolchains still expect v5, hence the conservative default.
+- `COPY tbl TO 'file.{xpt,sas7bdat,sav,por}'` now picks up DuckDB column
+  comments (set via `COMMENT ON COLUMN tbl.col IS '...'`) and writes them as
+  ReadStat variable labels — visible in SAS, SPSS, pyreadstat, haven, and R as
+  the column's descriptive label. Only applies when the COPY source is a
+  named base table; `COPY (SELECT …) TO …` has no source-table comment
+  metadata and writes empty labels. XPT v8 stores labels longer than 40 chars
+  in the LABELV8 long-label subrecord.
+- `read_stat_metadata(path, [format], [encoding])` — table function that
+  returns one row per variable with `(column_name, type, format, label)`,
+  without scanning the data. Useful for inspecting SAS / SPSS / Stata files
+  before importing, and for verifying that column comments propagated through
+  to ReadStat variable labels on export.
+
 ## [0.2.0-bring-out-your-dead] - 2026-05-03
 
 ### Added

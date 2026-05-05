@@ -14,6 +14,10 @@
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/hugeint.hpp"
+#include "duckdb/catalog/catalog.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/parser/column_list.hpp"
+#include "duckdb/parser/column_definition.hpp"
 
 extern "C" {
 #include "readstat.h"
@@ -21,21 +25,55 @@ extern "C" {
 
 namespace duckdb {
 
-enum class SasFormat { XPT, SAS7BDAT, SAV };
+enum class SasFormat { XPT, SAS7BDAT, SAV, POR };
+
+// SAV and POR share SPSS-side semantics: SPSS epoch (1582-10-14), SPSS format
+// strings (DATE11/DATETIME20/TIME8), spss_format_for_variable() handling.
+static inline bool IsSpssFamily(SasFormat f) {
+	return f == SasFormat::SAV || f == SasFormat::POR;
+}
 
 // ─── Per-format column-name validation ─────────────────────────────────────────
-// XPT v5: ≤ 8 chars, uppercased, ASCII alphanumeric or underscore, must start
-// with a letter or underscore. Names are uppercased before validation —
-// silent truncation would create silent collisions on round-trip.
-// SAS7BDAT / SAV: ≤ 32 chars, otherwise the same character rules. Case is
-// preserved (real SAS is case-insensitive but stores the user's casing; SPSS
-// is case-sensitive in modern versions).
+// XPT v5 / POR: ≤ 8 chars, uppercased, ASCII alphanumeric or underscore, must
+// start with a letter or underscore. Names are uppercased before validation —
+// silent truncation would create silent collisions on round-trip. (POR allows
+// '.', '@', '#', '$' too, but we keep the stricter A-Z 0-9 _ subset for
+// consistency with XPT.)
+// XPT v8 / SAS7BDAT / SAV: ≤ 32 chars, otherwise the same character rules. XPT
+// v8 still uppercases (XPT-family files are uppercase by convention); SAS7BDAT
+// and SAV preserve the user's casing.
 
-static string ValidateColumnName(const string &name, SasFormat format, const char *role) {
-	const size_t max_len = (format == SasFormat::XPT) ? 8 : 32;
-	const char *format_label = format == SasFormat::XPT     ? "XPT v5"
-	                           : format == SasFormat::SAS7BDAT ? "SAS7BDAT"
-	                                                          : "SAV";
+static size_t MaxNameLen(SasFormat format, uint8_t xpt_version) {
+	switch (format) {
+	case SasFormat::XPT:
+		return xpt_version == 8 ? 32 : 8;
+	case SasFormat::POR:
+		return 8;
+	case SasFormat::SAS7BDAT:
+	case SasFormat::SAV:
+		return 32;
+	}
+	return 8;
+}
+
+static const char *FormatLabelWithVersion(SasFormat format, uint8_t xpt_version) {
+	switch (format) {
+	case SasFormat::XPT:
+		return xpt_version == 8 ? "XPT v8" : "XPT v5";
+	case SasFormat::SAS7BDAT:
+		return "SAS7BDAT";
+	case SasFormat::SAV:
+		return "SAV";
+	case SasFormat::POR:
+		return "POR";
+	}
+	return "?";
+}
+
+static string ValidateColumnName(const string &name, SasFormat format, const char *role, uint8_t xpt_version = 5) {
+	const bool uppercase = format == SasFormat::XPT || format == SasFormat::POR;
+	const size_t max_len = MaxNameLen(format, xpt_version);
+	const char *format_label = FormatLabelWithVersion(format, xpt_version);
 
 	if (name.empty()) {
 		throw BinderException("Empty %s not allowed in %s export", role, format_label);
@@ -44,7 +82,7 @@ static string ValidateColumnName(const string &name, SasFormat format, const cha
 		throw BinderException("%s '%s' is too long for %s (max %llu chars). Rename in your SELECT.", role, name,
 		                      format_label, static_cast<uint64_t>(max_len));
 	}
-	string out = (format == SasFormat::XPT) ? StringUtil::Upper(name) : name;
+	string out = uppercase ? StringUtil::Upper(name) : name;
 	for (char c : out) {
 		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
 		if (!ok) {
@@ -63,6 +101,7 @@ static string ValidateColumnName(const string &name, SasFormat format, const cha
 struct ColumnSpec {
 	string original_name;
 	string mangled_name;
+	string label; // ReadStat variable label — sourced from DuckDB column comments
 	LogicalType duckdb_type;
 	readstat_type_t rs_type;
 	string rs_format;     // SAS-style "DATE9." / SPSS-style "DATE11" / "" for non-temporal
@@ -70,7 +109,7 @@ struct ColumnSpec {
 };
 
 static void MapDuckDBType(const LogicalType &dt, SasFormat fmt, ColumnSpec &spec) {
-	const bool is_spss = fmt == SasFormat::SAV;
+	const bool is_spss = IsSpssFamily(fmt);
 
 	switch (dt.id()) {
 	case LogicalTypeId::BOOLEAN:
@@ -126,14 +165,16 @@ static void MapDuckDBType(const LogicalType &dt, SasFormat fmt, ColumnSpec &spec
 
 struct SasExportBindData : public FunctionData {
 	SasFormat format = SasFormat::XPT;
+	uint8_t xpt_version = 5;                                    // XPT only — 5 (default) or 8
 	string label;
 	string table_name;                                          // XPT only
-	readstat_compress_t compression = READSTAT_COMPRESS_NONE;   // SAS7BDAT only
+	readstat_compress_t compression = READSTAT_COMPRESS_NONE;   // SAS7BDAT and SAV only
 	vector<ColumnSpec> columns;
 
 	unique_ptr<FunctionData> Copy() const override {
 		auto c = make_uniq<SasExportBindData>();
 		c->format = format;
+		c->xpt_version = xpt_version;
 		c->label = label;
 		c->table_name = table_name;
 		c->compression = compression;
@@ -151,8 +192,8 @@ struct SasExportBindData : public FunctionData {
 				return false;
 			}
 		}
-		return format == other.format && label == other.label && table_name == other.table_name &&
-		       compression == other.compression;
+		return format == other.format && xpt_version == other.xpt_version && label == other.label &&
+		       table_name == other.table_name && compression == other.compression;
 	}
 };
 
@@ -178,7 +219,10 @@ static SasFormat FormatFromInfo(const CopyInfo &info) {
 	if (fmt == "sav") {
 		return SasFormat::SAV;
 	}
-	throw BinderException("Unknown stats_duck export format '%s' (expected 'xpt', 'sas7bdat', or 'sav')",
+	if (fmt == "por") {
+		return SasFormat::POR;
+	}
+	throw BinderException("Unknown stats_duck export format '%s' (expected 'xpt', 'sas7bdat', 'sav', or 'por')",
 	                      info.format);
 }
 
@@ -190,6 +234,8 @@ static const char *FormatLabel(SasFormat f) {
 		return "SAS7BDAT";
 	case SasFormat::SAV:
 		return "SAV";
+	case SasFormat::POR:
+		return "POR";
 	}
 	return "?";
 }
@@ -203,6 +249,8 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 
 	// XPT-only: derive a default internal dataset name from the path basename.
 	// SAS7BDAT ignores readstat_writer_set_table_name, so we only build it for XPT.
+	// Truncation length follows xpt_version (set below from the VERSION option,
+	// defaulting to 5).
 	string xpt_base;
 	if (fmt == SasFormat::XPT) {
 		auto path = input.info.file_path;
@@ -215,9 +263,6 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 		if (xpt_base.empty()) {
 			xpt_base = "DATASET";
 		}
-		if (xpt_base.size() > 8) {
-			xpt_base = xpt_base.substr(0, 8);
-		}
 	}
 
 	bool table_name_user_provided = false;
@@ -228,6 +273,15 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 		}
 		if (loption == "label") {
 			bind_data->label = option.second[0].ToString();
+		} else if (loption == "version") {
+			if (fmt != SasFormat::XPT) {
+				throw BinderException("VERSION option is only meaningful for XPT export, not %s", fmt_label);
+			}
+			auto v = option.second[0].GetValue<int64_t>();
+			if (v != 5 && v != 8) {
+				throw BinderException("XPT VERSION must be 5 or 8, got %lld", static_cast<long long>(v));
+			}
+			bind_data->xpt_version = static_cast<uint8_t>(v);
 		} else if (loption == "table_name") {
 			if (fmt != SasFormat::XPT) {
 				throw BinderException("TABLE_NAME option is only meaningful for XPT export, not %s", fmt_label);
@@ -236,6 +290,8 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 			table_name_user_provided = true;
 		} else if (loption == "compression") {
 			if (fmt != SasFormat::SAS7BDAT && fmt != SasFormat::SAV) {
+				// POR is text-based; SPSS's spec defines no compression for it.
+				// XPT also has no compression in either v5 or v8.
 				throw BinderException("COMPRESSION option is only meaningful for SAS7BDAT and SAV export, not %s",
 				                      fmt_label);
 			}
@@ -253,13 +309,22 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 	}
 
 	if (fmt == SasFormat::XPT) {
+		// Truncate auto-derived path basenames to the version-appropriate width
+		// before validation. User-supplied TABLE_NAME is left intact and must
+		// validate as-is.
+		if (!table_name_user_provided) {
+			auto cap = MaxNameLen(SasFormat::XPT, bind_data->xpt_version);
+			if (xpt_base.size() > cap) {
+				xpt_base = xpt_base.substr(0, cap);
+			}
+		}
 		try {
-			bind_data->table_name = ValidateColumnName(xpt_base, fmt, "TABLE_NAME");
+			bind_data->table_name = ValidateColumnName(xpt_base, fmt, "TABLE_NAME", bind_data->xpt_version);
 		} catch (const BinderException &) {
 			if (table_name_user_provided) {
 				throw;
 			}
-			// Auto-derived name from path didn't fit XPT v5; fall back to "DATASET".
+			// Auto-derived name from path didn't validate; fall back to "DATASET".
 			bind_data->table_name = "DATASET";
 		}
 	}
@@ -270,8 +335,34 @@ static unique_ptr<FunctionData> SasExportBind(ClientContext &context, CopyFuncti
 		spec.original_name = names[i];
 		spec.duckdb_type = sql_types[i];
 		MapDuckDBType(sql_types[i], fmt, spec);
-		spec.mangled_name = ValidateColumnName(names[i], fmt, "column name");
+		spec.mangled_name = ValidateColumnName(names[i], fmt, "column name", bind_data->xpt_version);
 		bind_data->columns.push_back(std::move(spec));
+	}
+
+	// Pull DuckDB column comments into ReadStat variable labels for `COPY tbl TO ...`.
+	// CopyInfo.table is empty for `COPY (subquery) TO ...`, in which case there's
+	// no source-table catalog entry to consult and labels stay empty. This is
+	// intentional: a SELECT has no comment metadata of its own, only its source
+	// columns do, and reaching through the projection would mislabel computed
+	// columns.
+	if (!input.info.table.empty()) {
+		auto &catalog_name = input.info.catalog;
+		auto &schema_name = input.info.schema;
+		auto entry = Catalog::GetEntry<TableCatalogEntry>(context, catalog_name, schema_name, input.info.table,
+		                                                 OnEntryNotFound::RETURN_NULL);
+		if (entry) {
+			auto &columns = entry->GetColumns();
+			for (auto &spec : bind_data->columns) {
+				if (!columns.ColumnExists(spec.original_name)) {
+					continue;
+				}
+				const auto &col = columns.GetColumn(spec.original_name);
+				const Value &comment = col.Comment();
+				if (!comment.IsNull()) {
+					spec.label = comment.ToString();
+				}
+			}
+		}
 	}
 
 	return std::move(bind_data);
@@ -361,7 +452,7 @@ static ssize_t SasExportDataWriter(const void *bytes, size_t len, void *ctx) {
 
 static void InsertValue(readstat_writer_t *writer, const readstat_variable_t *var, const ColumnSpec &spec,
                         SasFormat sas_format, const Vector &vec_p, idx_t row, UnifiedVectorFormat &fmt) {
-	const int32_t epoch_offset = sas_format == SasFormat::SAV ? SPSS_EPOCH_OFFSET : SAS_EPOCH_OFFSET;
+	const int32_t epoch_offset = IsSpssFamily(sas_format) ? SPSS_EPOCH_OFFSET : SAS_EPOCH_OFFSET;
 	auto idx = fmt.sel->get_index(row);
 	if (!fmt.validity.RowIsValid(idx)) {
 		readstat_insert_missing_value(writer, var);
@@ -436,7 +527,7 @@ static void InsertValue(readstat_writer_t *writer, const readstat_variable_t *va
 		// then × 86400 to convert days→seconds).
 		auto days = UnifiedVectorFormat::GetData<date_t>(fmt)[idx].days;
 		double offset_days = static_cast<double>(days - epoch_offset);
-		double v = sas_format == SasFormat::SAV ? offset_days * 86400.0 : offset_days;
+		double v = IsSpssFamily(sas_format) ? offset_days * 86400.0 : offset_days;
 		readstat_insert_double_value(writer, var, v);
 		break;
 	}
@@ -466,9 +557,11 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 	readstat_set_data_writer(writer, SasExportDataWriter);
 
 	if (bind_data.format == SasFormat::XPT) {
-		// XPT v5 — most universally readable XPT version. v8 (longer names, wider
-		// strings) is a future phase.
-		readstat_writer_set_file_format_version(writer, 5);
+		// XPT v5 (default) — most universally readable. v8 lifts the column-name
+		// width to 32 chars and is read transparently by ReadStat-family readers
+		// (this extension's read_stat(), pyreadstat, haven, R), but some legacy
+		// SAS toolchains still expect v5.
+		readstat_writer_set_file_format_version(writer, bind_data.xpt_version);
 		if (!bind_data.table_name.empty()) {
 			readstat_writer_set_table_name(writer, bind_data.table_name.c_str());
 		}
@@ -495,6 +588,9 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 		if (!col.rs_format.empty()) {
 			readstat_variable_set_format(vars[i], col.rs_format.c_str());
 		}
+		if (!col.label.empty()) {
+			readstat_variable_set_label(vars[i], col.label.c_str());
+		}
 	}
 
 	long row_count = static_cast<long>(gstate.buffer->Count());
@@ -508,6 +604,9 @@ static void SasExportFinalize(ClientContext &, FunctionData &bind_data_p, Global
 		break;
 	case SasFormat::SAV:
 		err = readstat_begin_writing_sav(writer, gstate.file_handle.get(), row_count);
+		break;
+	case SasFormat::POR:
+		err = readstat_begin_writing_por(writer, gstate.file_handle.get(), row_count);
 		break;
 	}
 	if (err != READSTAT_OK) {
@@ -598,6 +697,15 @@ void RegisterSasExport(ExtensionLoader &loader) {
 	WireCopyFunction(sav);
 	sav.extension = "sav";
 	loader.RegisterFunction(sav);
+
+	// SPSS .por — Portable file format. ASCII-encoded sibling of SAV designed
+	// for cross-platform interchange in pre-Unicode SPSS workflows. Strict
+	// XPT-style 8-char uppercase column names and no compression. Variable
+	// labels are written via the same readstat_variable_set_label path.
+	CopyFunction por("por");
+	WireCopyFunction(por);
+	por.extension = "por";
+	loader.RegisterFunction(por);
 }
 
 } // namespace duckdb
