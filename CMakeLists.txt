@@ -111,6 +111,14 @@ endif()
 if(Iconv_FOUND AND NOT WIN32)
     target_link_libraries(${EXTENSION_NAME} Iconv::Iconv)
 endif()
+# Align readstat's iconv inbuf typedef with win_iconv's prototype on Windows.
+# readstat's readstat_iconv_inbuf_t is `ICONV_CONST char **`, win_iconv's iconv()
+# takes `WINICONV_CONST char **` which defaults to `const char **`. Without
+# ICONV_CONST=const, the cast in readstat_convert.c mismatches by one `const`
+# and newer GCCs (≥ windows-latest runner image, May 2026) reject it.
+if(WIN32)
+    target_compile_definitions(${EXTENSION_NAME} PRIVATE ICONV_CONST=const)
+endif()
 
 set(PARAMETERS "-warnings")
 # Force i64 → (i32,i32) legalization at the WASM ABI boundary. Emscripten ≥ 4.0
@@ -130,6 +138,9 @@ if(ZLIB_FOUND)
 endif()
 if(Iconv_FOUND AND NOT WIN32)
     target_link_libraries(${LOADABLE_EXTENSION_NAME} Iconv::Iconv)
+endif()
+if(WIN32)
+    target_compile_definitions(${LOADABLE_EXTENSION_NAME} PRIVATE ICONV_CONST=const)
 endif()
 
 install(
