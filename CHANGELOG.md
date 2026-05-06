@@ -44,6 +44,16 @@ that name is preserved across releases for backward compatibility.
   via extension-ci-tools' standard distribution matrix — this target is
   for local verification and side-loading. See README's "Building with
   MinGW" section.
+- `make zig_mingw_release` — second `windows_amd64_mingw` build variant
+  that uses zig's bundled clang + **libc++** instead of mingw-gcc's
+  **libstdc++**. The DuckDB platform string doesn't distinguish the two
+  C++ runtimes, so a `mingw_release` artifact loaded into a libc++-linked
+  DuckDB host (e.g. zig-built `sassy` with `link_libcpp = true`) passes
+  the platform check and segfaults at function registration — std::map
+  and friends have ABI-incompatible layouts across the two STLs. Output
+  lands at `build/zig_mingw_release/...` so it's distinguishable from
+  the GCC variant. Requires zig 0.16+ on `PATH`. Drives `cmake` via the
+  shim scripts in `scripts/zig-shims/`.
 
 ## [0.2.0-bring-out-your-dead] - 2026-05-03
 
