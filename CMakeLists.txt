@@ -154,7 +154,7 @@ install(
 # `ggsql_mark_v1_demo`. Lets us verify cross-WASM-module mark dispatch (a
 # stats_duck.wasm session looking up + invoking a mark registered by
 # marks_demo.wasm). Throwaway — do not ship.
-if(BUILD_GGSQL_SPIKE OR EMSCRIPTEN)
+if(BUILD_GGSQL_SPIKE)
     set(MARKS_DEMO_NAME marks_demo)
     set(MARKS_DEMO_SOURCES spike/marks_demo/marks_demo_extension.cpp)
     if(EMSCRIPTEN)

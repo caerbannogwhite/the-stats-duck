@@ -3,6 +3,9 @@ build/
 cmake-build-*/
 .cache/
 
+# Test runtime
+duckdb_unittest_tempdir/
+
 # IDE
 .idea/
 .vscode/

@@ -4,7 +4,7 @@
 #include <numeric>
 #include <stdexcept>
 
-#include "t_distribution.hpp"
+#include "distributions.hpp"
 
 namespace stats_duck {
 

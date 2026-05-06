@@ -55,6 +55,31 @@ diagnostics, multiple-testing corrections, and more distribution families.
 All tests return a `STRUCT` with the test statistic, degrees of freedom,
 p-value, and relevant effect sizes / confidence intervals.
 
+#### Common parameters
+
+| Parameter     | Type      | Default       | Description                                                      |
+| ------------- | --------- | ------------- | ---------------------------------------------------------------- |
+| `mu`          | `DOUBLE`  | `0.0`         | Hypothesized population mean (one-sample t-test only)            |
+| `equal_var`   | `BOOLEAN` | `false`       | Assume equal variances — Student's pooled test (two-sample only) |
+| `alpha`       | `DOUBLE`  | `0.05`        | Significance level for confidence intervals (t-tests only)       |
+| `alternative` | `VARCHAR` | `'two-sided'` | `'two-sided'`, `'less'`, or `'greater'`                          |
+
+#### Result struct fields
+
+**t-test:** `test_type`, `t_statistic`, `df`, `p_value`, `alternative`, `mean_diff`, `ci_lower`, `ci_upper`, `cohens_d`
+
+**Mann-Whitney:** `test_type`, `u_statistic`, `z_statistic`, `p_value`, `alternative`, `rank_biserial`
+
+**Wilcoxon:** `test_type`, `w_statistic`, `z_statistic`, `p_value`, `alternative`, `effect_size_r`
+
+**Pearson:** `test_type`, `r`, `t_statistic`, `df`, `p_value`, `alternative`, `ci_lower`, `ci_upper`, `n`
+
+**ANOVA:** `test_type`, `f_statistic`, `df_between`, `df_within`, `p_value`, `ss_between`, `ss_within`, `eta_squared`, `n_groups`, `n`
+
+**Chi-square:** `test_type`, `chi_square`, `df`, `p_value`, `n`, `n_rows`/`n_cols` or `n_categories`
+
+**Jarque-Bera:** `test_type`, `jb_statistic`, `skewness`, `excess_kurtosis`, `df`, `p_value`, `n`
+
 ### Descriptive statistics (aggregate)
 
 | Function                | Description                                                            |
@@ -123,29 +148,6 @@ ship their own marks without modifying stats_duck.
 **Type overrides:** append `:quantitative`, `:ordinal`, `:nominal`, or
 `:temporal` to an aesthetic to force its Vega-Lite type
 (e.g. `year AS color:ordinal`).
-
-**t-test result fields:** `test_type`, `t_statistic`, `df`, `p_value`, `alternative`, `mean_diff`, `ci_lower`, `ci_upper`, `cohens_d`
-
-**Mann-Whitney result fields:** `test_type`, `u_statistic`, `z_statistic`, `p_value`, `alternative`, `rank_biserial`
-
-**Wilcoxon result fields:** `test_type`, `w_statistic`, `z_statistic`, `p_value`, `alternative`, `effect_size_r`
-
-**Pearson result fields:** `test_type`, `r`, `t_statistic`, `df`, `p_value`, `alternative`, `ci_lower`, `ci_upper`, `n`
-
-**ANOVA result fields:** `test_type`, `f_statistic`, `df_between`, `df_within`, `p_value`, `ss_between`, `ss_within`, `eta_squared`, `n_groups`, `n`
-
-**Chi-square result fields:** `test_type`, `chi_square`, `df`, `p_value`, `n`, `n_rows`/`n_cols` or `n_categories`
-
-**Jarque-Bera result fields:** `test_type`, `jb_statistic`, `skewness`, `excess_kurtosis`, `df`, `p_value`, `n`
-
-### Common parameters
-
-| Parameter     | Type      | Default       | Description                                                      |
-| ------------- | --------- | ------------- | ---------------------------------------------------------------- |
-| `mu`          | `DOUBLE`  | `0.0`         | Hypothesized population mean (one-sample t-test only)            |
-| `equal_var`   | `BOOLEAN` | `false`       | Assume equal variances — Student's pooled test (two-sample only) |
-| `alpha`       | `DOUBLE`  | `0.05`        | Significance level for confidence intervals (t-tests only)       |
-| `alternative` | `VARCHAR` | `'two-sided'` | `'two-sided'`, `'less'`, or `'greater'`                          |
 
 ## Examples
 
