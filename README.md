@@ -50,7 +50,7 @@ diagnostics, multiple-testing corrections, and more distribution families.
 | `spearman_test(x, y, [alpha], [alternative])`                        | Spearman rank correlation                |
 | `kendall_test(x, y, [alternative])`                                  | Kendall's tau-b rank correlation         |
 | `anova_oneway(value, group)`                                         | One-way ANOVA                            |
-| `chisq_independence(row, col)`                                       | Chi-square test of independence          |
+| `chisq_independence(row, col, [continuity])`                         | Chi-square test of independence          |
 | `chisq_goodness_of_fit(category)`                                    | Chi-square goodness-of-fit (uniform)     |
 | `jarque_bera(column)`                                                | Jarque-Bera normality test               |
 

@@ -84,6 +84,62 @@ FROM (VALUES ('1','1'), ('1','1')) AS t(r, c)
 ----
 NULL
 
+# ─── Yates' continuity correction ───────────────────────────────────────────
+
+# SAS reference: 30, 10, 15, 25 (n=80). PROC FREQ reports
+#   Chi-Square              11.4286   p=0.0007
+#   Continuity Adj. χ²       9.9556   p=0.0016
+statement ok
+CREATE TABLE sas_table AS
+SELECT '1' AS r, '1' AS c FROM range(30) UNION ALL
+SELECT '1',     '2' FROM range(10) UNION ALL
+SELECT '2',     '1' FROM range(15) UNION ALL
+SELECT '2',     '2' FROM range(25);
+
+query TT
+SELECT ROUND((s.r).chi_square, 4),
+       ROUND((s.r).p_value, 4)
+FROM (SELECT chisq_independence(r, c) AS r FROM sas_table) AS s
+----
+11.4286	0.0007
+
+query TT
+SELECT ROUND((s.r).chi_square, 4),
+       ROUND((s.r).p_value, 4)
+FROM (SELECT chisq_independence(r, c, false) AS r FROM sas_table) AS s
+----
+11.4286	0.0007
+
+query TT
+SELECT ROUND((s.r).chi_square, 4),
+       ROUND((s.r).p_value, 4)
+FROM (SELECT chisq_independence(r, c, true) AS r FROM sas_table) AS s
+----
+9.9556	0.0016
+
+# Yates' shrinks chi-square (and inflates p) but never flips the sign
+query T
+SELECT (chisq_independence(r, c, true)).chi_square
+       < (chisq_independence(r, c, false)).chi_square
+FROM sas_table
+----
+true
+
+# Yates' is silently dropped on tables larger than 2x2 — same behaviour as
+# R's chisq.test(correct=TRUE). The 3x3 result must equal the no-correction one.
+query T
+SELECT (chisq_independence(r, c, true)).chi_square
+       = (chisq_independence(r, c, false)).chi_square
+FROM three_by_three
+----
+true
+
+# Bind error: non-constant continuity
+statement error
+SELECT chisq_independence(r, c, r = '1') FROM sas_table
+----
+continuity must be a constant boolean
+
 # GROUP BY: separate test per group
 statement ok
 CREATE TABLE per_group AS

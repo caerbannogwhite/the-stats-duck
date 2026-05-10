@@ -12,6 +12,12 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- `chisq_independence(row, col, [continuity])` — optional boolean
+  `continuity` (default `false`) toggles Yates' continuity correction.
+  Only applied when the table is exactly 2x2 (df=1); silently dropped
+  on larger tables, matching R `chisq.test(correct=TRUE)`. SAS PROC FREQ
+  reports `Continuity Adj. Chi-Square 9.9556` for the (30,10,15,25)
+  table — and so do we with `continuity=true`.
 - `mann_whitney_u(x, y, [alternative], [continuity])` — optional boolean
   `continuity` (default `false`) toggles the half-step continuity correction
   on the normal-approximation Z. Default matches scipy.stats.mannwhitneyu and

@@ -4,7 +4,9 @@
 #include "duckdb/function/aggregate_function.hpp"
 #include "duckdb/function/function_set.hpp"
 #include "duckdb/common/types/vector.hpp"
+#include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/planner/expression.hpp"
 
 #include <cmath>
 #include <string>
@@ -27,12 +29,30 @@ namespace duckdb {
 //       chi^2 = sum_k (O_k - n/k)^2 / (n/k)
 //   df = k - 1.
 //
-// Both tests are weak for very small expected frequencies (< 5); Brian's UI
-// can surface a warning based on the `n` and counts fields returned.
+// Both tests are weak for very small expected frequencies (< 5); Bedevere
+// Wise's UI can surface a warning based on the `n` and counts fields returned.
 
 namespace {
 
 // ── chisq_independence ─────────────────────────────────────────────────────
+
+struct ChiSqIndBindData : public FunctionData {
+	// Yates' continuity correction. Only applied when the contingency table
+	// is exactly 2x2 (df = 1) — Yates' is undefined for larger tables. Default
+	// false matches scipy.stats.chi2_contingency's correction=False / R
+	// chisq.test correct=FALSE / our prior behaviour.
+	bool continuity = false;
+
+	unique_ptr<FunctionData> Copy() const override {
+		auto copy = make_uniq<ChiSqIndBindData>();
+		copy->continuity = continuity;
+		return std::move(copy);
+	}
+
+	bool Equals(const FunctionData &other_p) const override {
+		return continuity == other_p.Cast<ChiSqIndBindData>().continuity;
+	}
+};
 
 static LogicalType ChiSqIndependenceResultType() {
 	child_list_t<LogicalType> children;
@@ -110,9 +130,32 @@ static void ChiSqIndDestroy(Vector &state_vector, AggregateInputData &, idx_t co
 	}
 }
 
-static void ChiSqIndFinalize(Vector &state_vector, AggregateInputData &, Vector &result, idx_t count, idx_t offset) {
+static unique_ptr<FunctionData> ChiSqIndBindNoArg(ClientContext &, AggregateFunction &,
+                                                  vector<unique_ptr<Expression>> &) {
+	return make_uniq<ChiSqIndBindData>();
+}
+
+static unique_ptr<FunctionData> ChiSqIndBindCorrect(ClientContext &context, AggregateFunction &function,
+                                                    vector<unique_ptr<Expression>> &arguments) {
+	if (!arguments[2]->IsFoldable()) {
+		throw BinderException("chisq_independence: continuity must be a constant boolean");
+	}
+	Value val = ExpressionExecutor::EvaluateScalar(context, *arguments[2]);
+	auto bd = make_uniq<ChiSqIndBindData>();
+	bd->continuity = val.GetValue<bool>();
+	Function::EraseArgument(function, arguments, 2);
+	return std::move(bd);
+}
+
+static void ChiSqIndFinalize(Vector &state_vector, AggregateInputData &aggr_input_data, Vector &result, idx_t count,
+                             idx_t offset) {
 	auto states = FlatVector::GetData<ChiSqIndependenceState *>(state_vector);
 	auto &children = StructVector::GetEntries(result);
+
+	bool continuity = false;
+	if (aggr_input_data.bind_data) {
+		continuity = aggr_input_data.bind_data->Cast<ChiSqIndBindData>().continuity;
+	}
 
 	for (idx_t i = 0; i < count; i++) {
 		auto &state = *states[i];
@@ -145,6 +188,10 @@ static void ChiSqIndFinalize(Vector &state_vector, AggregateInputData &, Vector 
 			continue;
 		}
 
+		// Yates' continuity correction is only defined for 2x2 (df=1). For
+		// larger tables it's silently dropped — same behaviour as R's
+		// chisq.test with correct=TRUE.
+		bool apply_yates = continuity && n_rows == 2 && n_cols == 2;
 		double chi_square = 0.0;
 		double n_d = static_cast<double>(n);
 		for (auto &row_kv : *state.table) {
@@ -154,8 +201,11 @@ static void ChiSqIndFinalize(Vector &state_vector, AggregateInputData &, Vector 
 				double observed = it != row_kv.second.end() ? static_cast<double>(it->second) : 0.0;
 				double expected = row_tot * static_cast<double>(col_kv.second) / n_d;
 				if (expected > 0.0) {
-					double diff = observed - expected;
-					chi_square += diff * diff / expected;
+					double abs_diff = std::abs(observed - expected);
+					if (apply_yates) {
+						abs_diff = (abs_diff > 0.5) ? abs_diff - 0.5 : 0.0;
+					}
+					chi_square += abs_diff * abs_diff / expected;
 				}
 			}
 		}
@@ -287,12 +337,19 @@ static void ChiSqGoFFinalize(Vector &state_vector, AggregateInputData &, Vector 
 
 } // namespace
 
+static AggregateFunction MakeChiSqInd(vector<LogicalType> args, bind_aggregate_function_t bind_fn) {
+	return AggregateFunction("chisq_independence", std::move(args), ChiSqIndependenceResultType(),
+	                         AggregateFunction::StateSize<ChiSqIndependenceState>, ChiSqIndInit, ChiSqIndUpdate,
+	                         ChiSqIndCombine, ChiSqIndFinalize, FunctionNullHandling::SPECIAL_HANDLING, nullptr,
+	                         bind_fn, ChiSqIndDestroy);
+}
+
 void RegisterChiSquareTests(ExtensionLoader &loader) {
-	AggregateFunction ind_fn("chisq_independence", {LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                          ChiSqIndependenceResultType(), AggregateFunction::StateSize<ChiSqIndependenceState>,
-	                          ChiSqIndInit, ChiSqIndUpdate, ChiSqIndCombine, ChiSqIndFinalize,
-	                          FunctionNullHandling::SPECIAL_HANDLING, nullptr, nullptr, ChiSqIndDestroy);
-	loader.RegisterFunction(ind_fn);
+	AggregateFunctionSet ind_set("chisq_independence");
+	ind_set.AddFunction(MakeChiSqInd({LogicalType::VARCHAR, LogicalType::VARCHAR}, ChiSqIndBindNoArg));
+	ind_set.AddFunction(
+	    MakeChiSqInd({LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::BOOLEAN}, ChiSqIndBindCorrect));
+	loader.RegisterFunction(ind_set);
 
 	AggregateFunction gof_fn("chisq_goodness_of_fit", {LogicalType::VARCHAR}, ChiSqGoFResultType(),
 	                          AggregateFunction::StateSize<ChiSqGoFState>, ChiSqGoFInit, ChiSqGoFUpdate, ChiSqGoFCombine,
