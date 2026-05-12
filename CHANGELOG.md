@@ -12,6 +12,14 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- `sign_test_1samp(x, [mu], [alternative])` and
+  `sign_test_paired(x, y, [alternative])` — one-sample and paired sign tests.
+  Classify each observation as positive, negative, or zero, exclude zeros,
+  and compute a binomial p-value against p=0.5. Matches SAS PROC UNIVARIATE
+  "Tests for Location: Sign" exactly (M = -4.5, p = 0.0039 on R's sleep
+  dataset). Result struct: `(test_type, m_statistic, n_pos, n_neg, n_zero,
+  p_value, alternative, n)`. Completes the "Tests for Location" trio
+  alongside Student's t and Wilcoxon signed-rank.
 - `wilcoxon_signed_rank(x, y, [alternative], [continuity])` — optional boolean
   `continuity` (default `false`) toggles the half-step continuity correction
   on the normal-approximation Z. Reuses the `NonParamBindData.continuity`
