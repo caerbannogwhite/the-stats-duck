@@ -162,6 +162,30 @@ ship their own marks without modifying stats_duck.
 `:temporal` to an aesthetic to force its Vega-Lite type
 (e.g. `year AS color:ordinal`).
 
+## SAS compatibility
+
+stats_duck defaults follow modern statistical conventions (scipy /
+R with `correct=FALSE` / `var.equal=FALSE`). The one exception is
+`summary_stats` — its skewness/kurtosis formulas are the Fisher-Pearson
+bias-corrected ones, which is what SAS PROC MEANS, pandas, and Excel
+report. To reproduce SAS PROC output exactly, use the toggles below.
+
+| SAS procedure / statistic                       | stats_duck call                                                       |
+| ----------------------------------------------- | --------------------------------------------------------------------- |
+| PROC MEANS — mean, SD, skewness, kurtosis       | `summary_stats(x)` *(default already matches SAS)*                    |
+| PROC TTEST — Pooled (equal variances)           | `ttest_2samp(x, y, true)`                                             |
+| PROC TTEST — Satterthwaite (default)            | `ttest_2samp(x, y)` *(default Welch's matches Satterthwaite)*         |
+| PROC NPAR1WAY — Wilcoxon two-sample Z           | `mann_whitney_u(x, y, 'two-sided', true)` *(continuity correction)*   |
+| PROC FREQ — Continuity Adj. χ² (2x2 only)       | `chisq_independence(row, col, true)` *(Yates' correction)*            |
+| PROC FREQ — Chi-Square (no adjustment)          | `chisq_independence(row, col)` *(default)*                            |
+| PROC CORR — Pearson / Spearman / Kendall        | `pearson_test(x, y)` / `spearman_test(x, y)` / `kendall_test(x, y)`   |
+| PROC GLM — one-way ANOVA F-test                 | `anova_oneway(value, group)`                                          |
+| PROC UNIVARIATE — Signed Rank (sign-rank test)  | `wilcoxon_signed_rank(x, 0)` *(against a 0 column or constant)*       |
+
+Defaults preserve modern conventions so users on the modern side of the
+fence get sensible numbers without touching the API; SAS users add the
+appropriate flag during migration and validation.
+
 ## Examples
 
 ### Hypothesis tests
