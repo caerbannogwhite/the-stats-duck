@@ -394,8 +394,11 @@ static void WilcoxonFinalize(Vector &state_vector, AggregateInputData &aggr_inpu
 	auto &children = StructVector::GetEntries(result);
 
 	string alternative = "two-sided";
+	bool continuity = false;
 	if (aggr_input_data.bind_data) {
-		alternative = aggr_input_data.bind_data->Cast<NonParamBindData>().alternative;
+		auto &bd = aggr_input_data.bind_data->Cast<NonParamBindData>();
+		alternative = bd.alternative;
+		continuity = bd.continuity;
 	}
 
 	for (idx_t i = 0; i < count; i++) {
@@ -431,7 +434,19 @@ static void WilcoxonFinalize(Vector &state_vector, AggregateInputData &aggr_inpu
 		double mu_W = dn * (dn + 1.0) / 4.0;
 		double sigma_W = std::sqrt(dn * (dn + 1.0) * (2.0 * dn + 1.0) / 24.0 - tie_correction / 48.0);
 
-		double z = (sigma_W > 0.0) ? (w_plus - mu_W) / sigma_W : 0.0;
+		double z;
+		if (sigma_W <= 0.0) {
+			z = 0.0;
+		} else if (continuity) {
+			// Half-step shrink of |W+ - mu| toward zero before standardising.
+			// Matches R wilcox.test(..., correct=TRUE) and SAS PROC UNIVARIATE.
+			double diff = w_plus - mu_W;
+			double abs_diff = std::abs(diff);
+			double corrected = (abs_diff > 0.5) ? abs_diff - 0.5 : 0.0;
+			z = std::copysign(corrected, diff) / sigma_W;
+		} else {
+			z = (w_plus - mu_W) / sigma_W;
+		}
 		double p_value = NormalPValue(z, alternative);
 		double effect_r = z / std::sqrt(dn);
 
@@ -457,6 +472,9 @@ void RegisterWilcoxonSignedRank(ExtensionLoader &loader) {
 	set.AddFunction(MakeWilcoxonAgg({LogicalType::DOUBLE, LogicalType::DOUBLE}, NonParamBindDefault));
 	set.AddFunction(
 	    MakeWilcoxonAgg({LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::VARCHAR}, NonParamBindAlt));
+	set.AddFunction(MakeWilcoxonAgg(
+	    {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::VARCHAR, LogicalType::BOOLEAN},
+	    NonParamBindAltCorrect));
 	loader.RegisterFunction(set);
 }
 

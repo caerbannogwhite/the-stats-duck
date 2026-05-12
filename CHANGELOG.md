@@ -12,6 +12,13 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- `wilcoxon_signed_rank(x, y, [alternative], [continuity])` — optional boolean
+  `continuity` (default `false`) toggles the half-step continuity correction
+  on the normal-approximation Z. Reuses the `NonParamBindData.continuity`
+  field that was added alongside the Mann-Whitney option. Matches R
+  `wilcox.test(..., correct=TRUE, exact=FALSE)` and SAS PROC UNIVARIATE's
+  asymptotic Z (SAS additionally offers an exact small-n distribution —
+  out of scope here).
 - `chisq_independence(row, col, [continuity])` — optional boolean
   `continuity` (default `false`) toggles Yates' continuity correction.
   Only applied when the table is exactly 2x2 (df=1); silently dropped

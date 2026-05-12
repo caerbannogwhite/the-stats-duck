@@ -45,7 +45,7 @@ diagnostics, multiple-testing corrections, and more distribution families.
 | `ttest_2samp(column1, column2, [equal_var], [alpha], [alternative])` | Two-sample t-test (Welch's or Student's) |
 | `ttest_paired(column1, column2, [alpha], [alternative])`             | Paired t-test                            |
 | `mann_whitney_u(column1, column2, [alternative], [continuity])`      | Mann-Whitney U test (Wilcoxon rank-sum)  |
-| `wilcoxon_signed_rank(column1, column2, [alternative])`              | Wilcoxon signed-rank test                |
+| `wilcoxon_signed_rank(column1, column2, [alternative], [continuity])`| Wilcoxon signed-rank test                |
 | `pearson_test(x, y, [alpha], [alternative])`                         | Pearson correlation with significance    |
 | `spearman_test(x, y, [alpha], [alternative])`                        | Spearman rank correlation                |
 | `kendall_test(x, y, [alternative])`                                  | Kendall's tau-b rank correlation         |

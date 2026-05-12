@@ -75,3 +75,43 @@ query T
 SELECT wilcoxon_signed_rank(a, b) FROM (VALUES (1.0, 1.0), (2.0, 2.0)) AS t(a, b)
 ----
 NULL
+
+# ─── continuity correction ──────────────────────────────────────────────────
+
+# R's sleep dataset (above). Without cc:  Z = -2.6679, p = 0.0076.
+# With cc (half-step shrink toward zero): Z = -2.6086, p = 0.0091.
+# Matches R's wilcox.test(..., paired=TRUE, exact=FALSE, correct=TRUE).
+query TT
+SELECT ROUND((r).z_statistic, 4),
+       ROUND((r).p_value, 4)
+FROM (SELECT wilcoxon_signed_rank(drug1, drug2) AS r FROM sleep)
+----
+-2.6679	0.0076
+
+query TT
+SELECT ROUND((r).z_statistic, 4),
+       ROUND((r).p_value, 4)
+FROM (SELECT wilcoxon_signed_rank(drug1, drug2, 'two-sided', false) AS r FROM sleep)
+----
+-2.6679	0.0076
+
+query TT
+SELECT ROUND((r).z_statistic, 4),
+       ROUND((r).p_value, 4)
+FROM (SELECT wilcoxon_signed_rank(drug1, drug2, 'two-sided', true) AS r FROM sleep)
+----
+-2.6086	0.0091
+
+# Continuity shrinks |Z| (p gets larger), preserving sign
+query T
+SELECT ABS((wilcoxon_signed_rank(drug1, drug2, 'two-sided', true)).z_statistic)
+       < ABS((wilcoxon_signed_rank(drug1, drug2, 'two-sided', false)).z_statistic)
+FROM sleep
+----
+true
+
+# Bind error: non-constant continuity
+statement error
+SELECT wilcoxon_signed_rank(drug1, drug2, 'two-sided', drug1 > drug2) FROM sleep
+----
+continuity must be a constant boolean
