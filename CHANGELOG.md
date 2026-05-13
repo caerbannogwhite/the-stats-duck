@@ -10,6 +10,22 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+## [0.3.1-customer] - 2026-05-13
+
+### Fixed
+
+- CI: excluded `windows_amd64` from the build / deploy matrix to work
+  around [duckdb/extension-ci-tools#371][371]. The hardcoded
+  `vcvars64.bat` path in v1.5.1 of the reusable workflow no longer
+  resolves on the current `windows-latest` image, so cmake silently
+  fell back to mingw and the link failed against the MSVC-built
+  `x64-windows-static-release` vcpkg libs. Identical code to v0.3.0
+  otherwise. Windows users without the MSVC artifact should use the
+  `windows_amd64_mingw` build (which uses mingw natively and is
+  unaffected). Revisit once upstream ships the fix.
+
+[371]: https://github.com/duckdb/extension-ci-tools/issues/371
+
 ## [0.3.0-customer] - 2026-05-13
 
 Focused on closing the gap with SAS PROC UNIVARIATE / PROC MEANS /
@@ -210,6 +226,7 @@ First public release.
 - `linux_amd64_musl` is excluded due to a known upstream issue in the v1.2.2 extension-ci-tools Alpine Dockerfile.
 - WASM binaries served via GitHub Pages at `https://caerbannogwhite.github.io/the-stats-duck`.
 
+[0.3.1-customer]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.3.1
 [0.3.0-customer]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.3.0
 [0.2.0-bring-out-your-dead]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.2.0
 [0.1.0-mortician]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.1.0
