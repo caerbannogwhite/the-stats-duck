@@ -10,6 +10,20 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+## [0.3.2-here-s-one] - 2026-05-13
+
+### Fixed
+
+- `scripts/zig-shims/zig-cxx.py`: switched `shlex.split` from non-POSIX
+  to POSIX mode when expanding CMake response files. The previous
+  non-POSIX variant preserved each token's surrounding double quotes
+  literally, so zig clang received `-I"C:/path"` with the quote
+  characters embedded in the path and failed to find every header in
+  `src/include` (and similar). POSIX mode strips the quotes. CMake's
+  MinGW Makefiles generator emits forward slashes inside the response
+  files, so the POSIX backslash-as-escape rule doesn't bite. `make
+  zig_mingw_release` now completes from a clean state.
+
 ## [0.3.1-customer] - 2026-05-13
 
 ### Fixed
@@ -226,6 +240,7 @@ First public release.
 - `linux_amd64_musl` is excluded due to a known upstream issue in the v1.2.2 extension-ci-tools Alpine Dockerfile.
 - WASM binaries served via GitHub Pages at `https://caerbannogwhite.github.io/the-stats-duck`.
 
+[0.3.2-here-s-one]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.3.2
 [0.3.1-customer]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.3.1
 [0.3.0-customer]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.3.0
 [0.2.0-bring-out-your-dead]: https://github.com/caerbannogwhite/the-stats-duck/releases/tag/v0.2.0
