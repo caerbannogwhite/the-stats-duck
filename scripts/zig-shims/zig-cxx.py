@@ -39,10 +39,13 @@ def expand_response_files(args):
     for a in args:
         if a.startswith("@"):
             with open(a[1:], "r", encoding="utf-8") as f:
-                # Response files use shell-style quoting. shlex.split handles
-                # the simple cases CMake emits (paths with spaces, double-quoted
-                # tokens, no environment variable expansion).
-                out.extend(shlex.split(f.read(), posix=False))
+                # CMake on Windows emits paths with forward slashes inside
+                # double quotes, e.g.  -I"C:/Users/.../include" . We need
+                # POSIX-style splitting so the surrounding quotes are stripped;
+                # otherwise zig clang sees the literal '-I"C:/..."' token,
+                # treats the quotes as part of the path name, and fails to
+                # find every header.
+                out.extend(shlex.split(f.read(), posix=True))
         else:
             out.append(a)
     return out
