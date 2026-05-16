@@ -1,0 +1,149 @@
+# name: test/sql/adjust_p.test
+# description: Multiple-testing p-value adjustment
+# group: [stats_duck]
+
+require stats_duck
+
+# Reference set used across R cross-checks:
+#   p <- c(0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205)
+# Values below come from R 4.5.3's p.adjust().
+
+# Bonferroni: q_i = min(1, n*p_i)
+query T
+SELECT adjust_p([0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205], 'bonferroni')
+----
+[0.008, 0.064, 0.312, 0.328, 0.336, 0.48, 0.592, 1.0]
+
+# Holm step-down
+query T
+SELECT [ROUND(v, 4) FOR v IN adjust_p([0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205], 'holm')]
+----
+[0.008, 0.056, 0.234, 0.234, 0.234, 0.234, 0.234, 0.234]
+
+# Hochberg step-up
+query T
+SELECT [ROUND(v, 4) FOR v IN adjust_p([0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205], 'hochberg')]
+----
+[0.008, 0.056, 0.148, 0.148, 0.148, 0.148, 0.148, 0.205]
+
+# Benjamini-Hochberg (FDR)
+query T
+SELECT [ROUND(v, 4) FOR v IN adjust_p([0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205], 'BH')]
+----
+[0.008, 0.032, 0.0672, 0.0672, 0.0672, 0.08, 0.0846, 0.205]
+
+# 'fdr' is an accepted alias for BH (matching R's p.adjust)
+query T
+SELECT [ROUND(v, 4) FOR v IN adjust_p([0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205], 'fdr')]
+----
+[0.008, 0.032, 0.0672, 0.0672, 0.0672, 0.08, 0.0846, 0.205]
+
+# Benjamini-Yekutieli (BH with harmonic-number penalty for arbitrary dependence)
+query T
+SELECT [ROUND(v, 4) FOR v IN adjust_p([0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205], 'BY')]
+----
+[0.0217, 0.087, 0.1826, 0.1826, 0.1826, 0.2174, 0.2299, 0.5572]
+
+# 'none' is a pass-through (matches R)
+query T
+SELECT adjust_p([0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205], 'none')
+----
+[0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205]
+
+# ─── Input-order preservation ───────────────────────────────────────────────
+
+# Same data shuffled — Bonferroni output should be in the same shuffled order.
+query T
+SELECT adjust_p([0.04, 0.01, 0.03, 0.02, 0.05], 'bonferroni')
+----
+[0.2, 0.05, 0.15, 0.1, 0.25]
+
+# Holm with shuffled input: again the output mirrors input order.
+# Sorted asc: 0.01, 0.02, 0.03, 0.04, 0.05; n=5.
+# Sorted adjusted: 0.05, 0.08, 0.09, 0.09, 0.09.
+# Mapped back to shuffled input order [0.04, 0.01, 0.03, 0.02, 0.05]:
+#   0.04 was at sorted-position 4 → 0.09
+#   0.01 was at sorted-position 1 → 0.05
+#   0.03 was at sorted-position 3 → 0.09
+#   0.02 was at sorted-position 2 → 0.08
+#   0.05 was at sorted-position 5 → 0.09
+query T
+SELECT adjust_p([0.04, 0.01, 0.03, 0.02, 0.05], 'holm')
+----
+[0.09, 0.05, 0.09, 0.08, 0.09]
+
+# ─── NULL handling ──────────────────────────────────────────────────────────
+
+# NULLs pass through; n excludes them. For [0.01, NULL, 0.02] with method
+# Bonferroni: n=2, so 0.01→0.02, 0.02→0.04, NULL→NULL.
+query T
+SELECT adjust_p([0.01, NULL, 0.02], 'bonferroni')
+----
+[0.02, NULL, 0.04]
+
+# All-NULL input → all-NULL output (no work to do)
+query T
+SELECT adjust_p([NULL::DOUBLE, NULL, NULL], 'BH')
+----
+[NULL, NULL, NULL]
+
+# Empty list → empty list
+query T
+SELECT adjust_p([]::DOUBLE[], 'BH')
+----
+[]
+
+# Single value → returned unchanged (n=1 multipliers are all 1)
+query T
+SELECT adjust_p([0.03], 'bonferroni')
+----
+[0.03]
+
+# ─── Real workflow: per-test adjustment ──────────────────────────────────────
+
+statement ok
+CREATE TABLE test_results AS SELECT * FROM (VALUES
+    ('test_a', 0.001),
+    ('test_b', 0.008),
+    ('test_c', 0.039),
+    ('test_d', 0.041),
+    ('test_e', 0.042),
+    ('test_f', 0.060),
+    ('test_g', 0.074),
+    ('test_h', 0.205)
+) AS t(test_id, p_value);
+
+# Aggregate p-values, adjust, unnest, join back by row order.
+# Standard idiom: use LIST() to collect, then adjust_p, then unnest.
+query TT
+WITH ordered AS (
+    SELECT test_id, p_value, ROW_NUMBER() OVER (ORDER BY test_id) AS rn
+    FROM test_results
+),
+adjusted AS (
+    SELECT adjust_p(LIST(p_value ORDER BY test_id), 'BH') AS adj FROM test_results
+)
+SELECT o.test_id, ROUND(a.adj[o.rn::INTEGER], 4)
+FROM ordered o, adjusted a
+ORDER BY o.test_id
+----
+test_a	0.008
+test_b	0.032
+test_c	0.0672
+test_d	0.0672
+test_e	0.0672
+test_f	0.08
+test_g	0.0846
+test_h	0.205
+
+# ─── Error cases ────────────────────────────────────────────────────────────
+
+statement error
+SELECT adjust_p([0.01], 'bogus')
+----
+unknown method 'bogus'
+
+statement error
+SELECT adjust_p([0.01], 'BONFERRONI')
+----
+unknown method 'BONFERRONI'

@@ -71,6 +71,7 @@ set(EXTENSION_SOURCES
     src/correlation_function.cpp
     src/rank_correlation_function.cpp
     src/sign_test_function.cpp
+    src/adjust_p_function.cpp
     src/normality_function.cpp
     src/anova_function.cpp
     src/chisq_function.cpp

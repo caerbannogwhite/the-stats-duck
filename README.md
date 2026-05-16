@@ -39,24 +39,24 @@ diagnostics, multiple-testing corrections, and more distribution families.
 
 ### Hypothesis tests (aggregate)
 
-| Function                                                             | Description                              |
-| -------------------------------------------------------------------- | ---------------------------------------- |
-| `ttest_1samp(column, [mu], [alpha], [alternative])`                  | One-sample t-test                        |
-| `ttest_2samp(column1, column2, [equal_var], [alpha], [alternative])` | Two-sample t-test (Welch's or Student's) |
-| `ttest_paired(column1, column2, [alpha], [alternative])`             | Paired t-test                            |
-| `mann_whitney_u(column1, column2, [alternative], [continuity])`      | Mann-Whitney U test (Wilcoxon rank-sum)  |
-| `wilcoxon_signed_rank(column1, column2, [alternative], [continuity])`| Wilcoxon signed-rank test                |
-| `pearson_test(x, y, [alpha], [alternative])`                         | Pearson correlation with significance    |
-| `spearman_test(x, y, [alpha], [alternative])`                        | Spearman rank correlation                |
-| `kendall_test(x, y, [alternative])`                                  | Kendall's tau-b rank correlation         |
-| `anova_oneway(value, group)`                                         | One-way ANOVA                            |
-| `chisq_independence(row, col, [continuity])`                         | Chi-square test of independence          |
-| `chisq_goodness_of_fit(category)`                                    | Chi-square goodness-of-fit (uniform)     |
-| `jarque_bera(column)`                                                | Jarque-Bera normality test               |
-| `shapiro_wilk(column)`                                               | Shapiro-Wilk normality test (Royston AS R94) |
-| `anderson_darling(column)`                                           | Anderson-Darling normality test          |
-| `sign_test_1samp(column, [mu], [alternative])`                       | Sign test on the median                  |
-| `sign_test_paired(column1, column2, [alternative])`                  | Paired sign test                         |
+| Function                                                              | Description                                  |
+| --------------------------------------------------------------------- | -------------------------------------------- |
+| `ttest_1samp(column, [mu], [alpha], [alternative])`                   | One-sample t-test                            |
+| `ttest_2samp(column1, column2, [equal_var], [alpha], [alternative])`  | Two-sample t-test (Welch's or Student's)     |
+| `ttest_paired(column1, column2, [alpha], [alternative])`              | Paired t-test                                |
+| `mann_whitney_u(column1, column2, [alternative], [continuity])`       | Mann-Whitney U test (Wilcoxon rank-sum)      |
+| `wilcoxon_signed_rank(column1, column2, [alternative], [continuity])` | Wilcoxon signed-rank test                    |
+| `pearson_test(x, y, [alpha], [alternative])`                          | Pearson correlation with significance        |
+| `spearman_test(x, y, [alpha], [alternative])`                         | Spearman rank correlation                    |
+| `kendall_test(x, y, [alternative])`                                   | Kendall's tau-b rank correlation             |
+| `anova_oneway(value, group)`                                          | One-way ANOVA                                |
+| `chisq_independence(row, col, [continuity])`                          | Chi-square test of independence              |
+| `chisq_goodness_of_fit(category)`                                     | Chi-square goodness-of-fit (uniform)         |
+| `jarque_bera(column)`                                                 | Jarque-Bera normality test                   |
+| `shapiro_wilk(column)`                                                | Shapiro-Wilk normality test (Royston AS R94) |
+| `anderson_darling(column)`                                            | Anderson-Darling normality test              |
+| `sign_test_1samp(column, [mu], [alternative])`                        | Sign test on the median                      |
+| `sign_test_paired(column1, column2, [alternative])`                   | Paired sign test                             |
 
 All tests return a `STRUCT` with the test statistic, degrees of freedom,
 p-value, and relevant effect sizes / confidence intervals.
@@ -99,8 +99,8 @@ p-value, and relevant effect sizes / confidence intervals.
 
 ### Descriptive statistics (aggregate)
 
-| Function                | Description                                                            |
-| ----------------------- | ---------------------------------------------------------------------- |
+| Function                                                    | Description                                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `summary_stats(column, [bias_correction], [quantile_type])` | n, n_missing, mean, sd, variance, min, q1, median, q3, max, iqr, skewness, kurtosis, mode, mode_frequency, is_multimodal |
 
 `bias_correction` (BOOLEAN, default `true`) toggles the skewness/kurtosis
@@ -117,6 +117,7 @@ UNIVARIATE's "Mode ." output.
 
 `quantile_type` (INTEGER, default `7`) picks the Hyndman & Fan (1996)
 quantile algorithm used for `q1`, `median`, and `q3`. Supported values:
+
 - `7` — R / Excel INC default. `position = 1 + q * (n - 1)`.
 - `5` — SAS PROC UNIVARIATE default. `position = q * n + 0.5`.
 
@@ -125,20 +126,40 @@ gives Q1=1.5 / Q3=3.5 (matching SAS PROC MEANS).
 
 ### Distribution functions (scalar)
 
-| Function                          | Description                  |
-| --------------------------------- | ---------------------------- |
-| `dnorm(x, [mean], [sd])`         | Normal PDF                   |
-| `pnorm(x, [mean], [sd])`         | Normal CDF                   |
-| `qnorm(p, [mean], [sd])`         | Normal quantile              |
-| `dt(x, df)`                      | Student's t PDF              |
-| `pt(x, df)`                      | Student's t CDF              |
-| `qt(p, df)`                      | Student's t quantile         |
-| `dchisq(x, df)`                  | Chi-square PDF               |
-| `pchisq(x, df)`                  | Chi-square CDF               |
-| `qchisq(p, df)`                  | Chi-square quantile          |
-| `df(x, df1, df2)`                | F distribution PDF           |
-| `pf(x, df1, df2)`                | F distribution CDF           |
-| `qf(p, df1, df2)`                | F distribution quantile      |
+| Function                 | Description             |
+| ------------------------ | ----------------------- |
+| `dnorm(x, [mean], [sd])` | Normal PDF              |
+| `pnorm(x, [mean], [sd])` | Normal CDF              |
+| `qnorm(p, [mean], [sd])` | Normal quantile         |
+| `dt(x, df)`              | Student's t PDF         |
+| `pt(x, df)`              | Student's t CDF         |
+| `qt(p, df)`              | Student's t quantile    |
+| `dchisq(x, df)`          | Chi-square PDF          |
+| `pchisq(x, df)`          | Chi-square CDF          |
+| `qchisq(p, df)`          | Chi-square quantile     |
+| `df(x, df1, df2)`        | F distribution PDF      |
+| `pf(x, df1, df2)`        | F distribution CDF      |
+| `qf(p, df1, df2)`        | F distribution quantile |
+
+### Multiple-testing correction (scalar)
+
+| Function                                | Description                                                                |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| `adjust_p(pvals, method)`               | Apply a multiple-testing correction to a list of p-values                  |
+
+`adjust_p` takes a `LIST<DOUBLE>` of raw p-values and a method name, and
+returns adjusted p-values in input order. Methods (case-sensitive, matching
+R's `p.adjust`):
+
+- `'bonferroni'` — `min(1, n · p_i)`.
+- `'holm'` — Holm step-down (1979).
+- `'hochberg'` — Hochberg step-up (1988).
+- `'BH'` (alias `'fdr'`) — Benjamini-Hochberg FDR (1995).
+- `'BY'` — Benjamini-Yekutieli FDR (2001) for arbitrary dependence.
+- `'none'` — pass-through, returns the input unchanged.
+
+NULLs in the input list are passed through to the output at the same
+position and are excluded from `n`.
 
 ### Data import (table function)
 
@@ -148,11 +169,11 @@ gives Q1=1.5 / Q3=3.5 (matching SAS PROC MEANS).
 
 ### Data export (COPY function)
 
-| Statement                                  | Description                      |
-| ------------------------------------------ | -------------------------------- |
-| `COPY <table> TO 'file.xpt'`               | Write SAS Transport (XPT v5)     |
-| `COPY <table> TO 'file.sas7bdat'`          | Write SAS7BDAT (see caveat below)|
-| `COPY <table> TO 'file.sav'`               | Write SPSS SAV                   |
+| Statement                         | Description                       |
+| --------------------------------- | --------------------------------- |
+| `COPY <table> TO 'file.xpt'`      | Write SAS Transport (XPT v5)      |
+| `COPY <table> TO 'file.sas7bdat'` | Write SAS7BDAT (see caveat below) |
+| `COPY <table> TO 'file.sav'`      | Write SPSS SAV                    |
 
 > **SAS7BDAT caveat.** ReadStat's SAS7BDAT writer is reverse-engineered: files
 > round-trip through ReadStat-family readers (this extension's `read_stat()`,
@@ -194,19 +215,19 @@ R with `correct=FALSE` / `var.equal=FALSE`). The one exception is
 bias-corrected ones, which is what SAS PROC MEANS, pandas, and Excel
 report. To reproduce SAS PROC output exactly, use the toggles below.
 
-| SAS procedure / statistic                       | stats_duck call                                                       |
-| ----------------------------------------------- | --------------------------------------------------------------------- |
-| PROC MEANS — mean, SD, skewness, kurtosis       | `summary_stats(x)` *(default already matches SAS)*                    |
-| PROC TTEST — Pooled (equal variances)           | `ttest_2samp(x, y, true)`                                             |
-| PROC TTEST — Satterthwaite (default)            | `ttest_2samp(x, y)` *(default Welch's matches Satterthwaite)*         |
-| PROC NPAR1WAY — Wilcoxon two-sample Z           | `mann_whitney_u(x, y, 'two-sided', true)` *(continuity correction)*   |
-| PROC FREQ — Continuity Adj. χ² (2x2 only)       | `chisq_independence(row, col, true)` *(Yates' correction)*            |
-| PROC FREQ — Chi-Square (no adjustment)          | `chisq_independence(row, col)` *(default)*                            |
-| PROC CORR — Pearson / Spearman / Kendall        | `pearson_test(x, y)` / `spearman_test(x, y)` / `kendall_test(x, y)`   |
-| PROC GLM — one-way ANOVA F-test                 | `anova_oneway(value, group)`                                          |
-| PROC UNIVARIATE — Signed Rank (sign-rank test)  | `wilcoxon_signed_rank(x, 0)` *(against a 0 column or constant)*       |
-| PROC UNIVARIATE — Sign test (M statistic)       | `sign_test_1samp(x, [mu_0])`                                          |
-| PROC UNIVARIATE — quantiles (Type 5)            | `summary_stats(x, true, 5)`                                           |
+| SAS procedure / statistic                      | stats_duck call                                                     |
+| ---------------------------------------------- | ------------------------------------------------------------------- |
+| PROC MEANS — mean, SD, skewness, kurtosis      | `summary_stats(x)` _(default already matches SAS)_                  |
+| PROC TTEST — Pooled (equal variances)          | `ttest_2samp(x, y, true)`                                           |
+| PROC TTEST — Satterthwaite (default)           | `ttest_2samp(x, y)` _(default Welch's matches Satterthwaite)_       |
+| PROC NPAR1WAY — Wilcoxon two-sample Z          | `mann_whitney_u(x, y, 'two-sided', true)` _(continuity correction)_ |
+| PROC FREQ — Continuity Adj. χ² (2x2 only)      | `chisq_independence(row, col, true)` _(Yates' correction)_          |
+| PROC FREQ — Chi-Square (no adjustment)         | `chisq_independence(row, col)` _(default)_                          |
+| PROC CORR — Pearson / Spearman / Kendall       | `pearson_test(x, y)` / `spearman_test(x, y)` / `kendall_test(x, y)` |
+| PROC GLM — one-way ANOVA F-test                | `anova_oneway(value, group)`                                        |
+| PROC UNIVARIATE — Signed Rank (sign-rank test) | `wilcoxon_signed_rank(x, 0)` _(against a 0 column or constant)_     |
+| PROC UNIVARIATE — Sign test (M statistic)      | `sign_test_1samp(x, [mu_0])`                                        |
+| PROC UNIVARIATE — quantiles (Type 5)           | `summary_stats(x, true, 5)`                                         |
 
 Defaults preserve modern conventions so users on the modern side of the
 fence get sensible numbers without touching the API; SAS users add the
@@ -425,7 +446,7 @@ make release
 
 ### Building with MinGW
 
-DuckDB extensions are tagged at build time with a *platform string* that the
+DuckDB extensions are tagged at build time with a _platform string_ that the
 host process uses to validate ABI compatibility before loading. The default
 `make release` on Windows uses MSVC and stamps `windows_amd64`. A consumer
 DuckDB built with mingw-w64 (e.g. via zig's bundled clang + mingw-w64
@@ -483,7 +504,7 @@ which they do across **libstdc++** (GNU's STL, what mingw-w64 GCC uses) and
 The downstream [sassy](https://github.com/caerbannogwhite/sassy) SAS
 interpreter builds DuckDB with zig + `link_libcpp = true`, so its DuckDB
 links against libc++. The `make mingw_release` target above produces a
-libstdc++-linked binary and is *not* compatible — it'll segfault inside
+libstdc++-linked binary and is _not_ compatible — it'll segfault inside
 sassy. Use the zig variant instead:
 
 ```bash

@@ -12,6 +12,12 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- `adjust_p(pvals LIST<DOUBLE>, method VARCHAR) → LIST<DOUBLE>` — multiple-
+  testing correction. Methods match R's `p.adjust`: `'bonferroni'`, `'holm'`,
+  `'hochberg'`, `'BH'` (alias `'fdr'`), `'BY'`, `'none'`. Returns adjusted
+  p-values in input order; NULLs pass through and are excluded from `n`.
+  R-verified to all displayed digits across all five methods on a standard
+  reference set.
 - `shapiro_wilk(x)` — Shapiro-Wilk normality test via Royston (1995)'s AS R94
   polynomial approximation. Valid for n in [3, 5000]. The same algorithm
   shipped by scipy.stats.shapiro and R's shapiro.test, with no exact
@@ -41,7 +47,7 @@ that name is preserved across releases for backward compatibility.
   `src/include` (and similar). POSIX mode strips the quotes. CMake's
   MinGW Makefiles generator emits forward slashes inside the response
   files, so the POSIX backslash-as-escape rule doesn't bite. `make
-  zig_mingw_release` now completes from a clean state.
+zig_mingw_release` now completes from a clean state.
 
 ## [0.3.1-customer] - 2026-05-13
 
@@ -110,7 +116,7 @@ default; existing callers see no behavioural change.
 
 - **SPSS Portable (POR) export**: `COPY tbl TO 'file.por'`. Same type
   and NULL semantics as the SAV writer, with XPT-style strict
-  column-name rules (≤ 8 chars uppercase, A-Z 0-9 _) and no compression
+  column-name rules (≤ 8 chars uppercase, A-Z 0-9 \_) and no compression
   (POR is plain ASCII). The reader has supported `.por` since v0.1.0.
 
 - **XPT version-8 export**: `COPY tbl TO 'file.xpt' (VERSION 8)` lifts
@@ -120,7 +126,7 @@ default; existing callers see no behavioural change.
   some legacy SAS toolchains still expect v5.
 
 - **Column-label propagation on export**: `COPY tbl TO
-  'file.{xpt,sas7bdat,sav,por}'` picks up DuckDB column comments
+'file.{xpt,sas7bdat,sav,por}'` picks up DuckDB column comments
   (`COMMENT ON COLUMN tbl.col IS '...'`) and writes them as ReadStat
   variable labels — visible in SAS, SPSS, pyreadstat, haven, and R as
   the column's descriptive label. Only applies when the COPY source is
@@ -130,7 +136,7 @@ default; existing callers see no behavioural change.
 
 - **`read_stat_metadata(path, [format], [encoding])`** — table function
   returning one row per variable with `(column_name, type, format,
-  label)`, without scanning the data. Useful for inspecting SAS / SPSS
+label)`, without scanning the data. Useful for inspecting SAS / SPSS
   / Stata files before importing, and for verifying that column
   comments propagated through to ReadStat variable labels on export.
 
@@ -189,7 +195,7 @@ default; existing callers see no behavioural change.
   collapse to empty strings (SAS character columns have no NULL/empty distinction).
   Output goes through DuckDB's `FileSystem` so registered/remote/WASM paths work
   the same as `read_stat()`. Optional `LABEL` and `TABLE_NAME` options. XPT v5
-  column-name rules (≤ 8 chars uppercase, A-Z 0-9 _) are validated at bind — no
+  column-name rules (≤ 8 chars uppercase, A-Z 0-9 \_) are validated at bind — no
   silent truncation. Buffers the full result set in a `ColumnDataCollection`
   (spillable via DuckDB's buffer manager) before emitting, since ReadStat's writer
   requires the row count up front.
