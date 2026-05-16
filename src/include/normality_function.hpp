@@ -11,6 +11,14 @@ namespace duckdb {
 //! p_value, n).
 void RegisterJarqueBera(ExtensionLoader &loader);
 
+//! Registers shapiro_wilk(column) — the Shapiro-Wilk normality test via
+//! Royston's AS R94 (1995) polynomial approximation. Valid for n in [3, 5000].
+//! W is the squared correlation of the sorted standardised values against the
+//! normal-quantile plotting positions; under H0 (normality), W is close to 1
+//! and small values are evidence against normality. Returns STRUCT(test_type,
+//! w_statistic, p_value, n).
+void RegisterShapiroWilk(ExtensionLoader &loader);
+
 //! Registers anderson_darling(column) — Anderson-Darling normality test
 //! against the fitted normal (mean and variance estimated from the sample).
 //! Buffer-based aggregate: state holds the values, sort + scan happen in

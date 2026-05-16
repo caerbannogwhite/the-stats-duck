@@ -363,10 +363,269 @@ static void ADFinalize(Vector &state_vector, AggregateInputData &, Vector &resul
 
 } // namespace
 
+// =============================================================================
+// Shapiro-Wilk (Royston 1995, AS R94)
+// =============================================================================
+//
+// W = (Σ a_i x_(i))² / Σ (x_i - x̄)²
+//
+// where a_i are coefficients antisymmetric around the middle (a_i = -a_{n+1-i})
+// derived from the normal-quantile plotting positions m_i = Φ^-1((i - 3/8) /
+// (n + 1/4)) plus a polynomial correction for the top two coefficients. The
+// polynomial replaces the Shapiro-Wilk 1965 coefficient tables and extends
+// the valid range to n in [3, 5000]. AS R94 is what scipy.stats.shapiro and
+// R's shapiro.test ship.
+//
+// Reference: Royston, P. (1995). "Algorithm AS R94: A Remark on Algorithm
+// AS 181: The W-test for Normality". J. R. Statist. Soc. C 44 (4): 547-551.
+
+namespace {
+
+// Polynomial coefficients. Constants verified against scipy/stats/
+// _ansari_swilk_statistics.pyx (algorithm only; no source code copied).
+//
+//   C1, C2 — corrections to a_n and a_{n-1}; argument is 1/sqrt(n).
+//   C3, C4 — small-n (4..11) p-value transform; argument is n.
+//   C5, C6 — large-n (12..5000) p-value transform; argument is log(n).
+//   G      — small-n γ for the log-of-log transform; argument is n.
+static const double C1[6] = {0.0, 0.221157, -0.147981, -2.07119, 4.434685, -2.706056};
+static const double C2[6] = {0.0, 0.042981, -0.293762, -1.752461, 5.682633, -3.582633};
+static const double C3[4] = {0.5440, -0.39978, 0.025054, -0.0006714};
+static const double C4[4] = {1.3822, -0.77857, 0.062767, -0.0020322};
+static const double C5[4] = {-1.5861, -0.31082, -0.083751, 0.0038915};
+static const double C6[3] = {-0.4803, -0.082676, 0.0030302};
+static const double G[2] = {-2.273, 0.459};
+
+//! Horner-rule polynomial evaluator: coef[0] + coef[1]*x + ... + coef[n-1]*x^(n-1).
+static double Polyval(const double *coef, int len, double x) {
+	double r = coef[len - 1];
+	for (int i = len - 2; i >= 0; i--) {
+		r = r * x + coef[i];
+	}
+	return r;
+}
+
+static LogicalType SWResultType() {
+	child_list_t<LogicalType> children;
+	children.emplace_back("test_type", LogicalType::VARCHAR);
+	children.emplace_back("w_statistic", LogicalType::DOUBLE);
+	children.emplace_back("p_value", LogicalType::DOUBLE);
+	children.emplace_back("n", LogicalType::BIGINT);
+	return LogicalType::STRUCT(std::move(children));
+}
+
+struct SWState {
+	std::vector<double> *values;
+};
+
+static void SWInit(const AggregateFunction &, data_ptr_t state_p) {
+	auto &state = *reinterpret_cast<SWState *>(state_p);
+	state.values = nullptr;
+}
+
+static void SWUpdate(Vector inputs[], AggregateInputData &, idx_t, Vector &state_vector, idx_t count) {
+	UnifiedVectorFormat idata;
+	inputs[0].ToUnifiedFormat(count, idata);
+	auto states = FlatVector::GetData<SWState *>(state_vector);
+	auto values = UnifiedVectorFormat::GetData<double>(idata);
+	for (idx_t i = 0; i < count; i++) {
+		auto idx = idata.sel->get_index(i);
+		if (!idata.validity.RowIsValid(idx)) {
+			continue;
+		}
+		double v = values[idx];
+		if (std::isnan(v)) {
+			continue;
+		}
+		auto &state = *states[i];
+		if (!state.values) {
+			state.values = new std::vector<double>();
+		}
+		state.values->push_back(v);
+	}
+}
+
+static void SWCombine(Vector &source, Vector &target, AggregateInputData &, idx_t count) {
+	auto src = FlatVector::GetData<SWState *>(source);
+	auto tgt = FlatVector::GetData<SWState *>(target);
+	for (idx_t i = 0; i < count; i++) {
+		auto &s = *src[i];
+		auto &t = *tgt[i];
+		if (!s.values || s.values->empty()) {
+			continue;
+		}
+		if (!t.values) {
+			t.values = new std::vector<double>();
+		}
+		t.values->insert(t.values->end(), s.values->begin(), s.values->end());
+	}
+}
+
+static void SWDestroy(Vector &state_vector, AggregateInputData &, idx_t count) {
+	auto states = FlatVector::GetData<SWState *>(state_vector);
+	for (idx_t i = 0; i < count; i++) {
+		delete states[i]->values;
+	}
+}
+
+static void SWFinalize(Vector &state_vector, AggregateInputData &, Vector &result, idx_t count, idx_t offset) {
+	auto states = FlatVector::GetData<SWState *>(state_vector);
+	auto &children = StructVector::GetEntries(result);
+
+	constexpr double SMALL_P = 1.0e-19;
+
+	for (idx_t i = 0; i < count; i++) {
+		auto &state = *states[i];
+		auto idx = i + offset;
+		if (!state.values || state.values->size() < 3 || state.values->size() > 5000) {
+			FlatVector::SetNull(result, idx, true);
+			continue;
+		}
+
+		auto &values = *state.values;
+		idx_t n = values.size();
+		double n_d = static_cast<double>(n);
+		std::sort(values.begin(), values.end());
+
+		// All-equal input: degenerate sample, W = 1 / p = 1 (vacuously normal).
+		if (values.front() == values.back()) {
+			FlatVector::GetData<string_t>(*children[0])[idx] =
+			    StringVector::AddString(*children[0], "Shapiro-Wilk");
+			FlatVector::GetData<double>(*children[1])[idx] = 1.0;
+			FlatVector::GetData<double>(*children[2])[idx] = 1.0;
+			FlatVector::GetData<int64_t>(*children[3])[idx] = static_cast<int64_t>(n);
+			continue;
+		}
+
+		double mean = 0.0;
+		for (double v : values) {
+			mean += v;
+		}
+		mean /= n_d;
+		double sx2 = 0.0;
+		for (double v : values) {
+			double d = v - mean;
+			sx2 += d * d;
+		}
+
+		double w;
+		if (n == 3) {
+			// Exact n=3 case: a = (-1/√2, 0, +1/√2), so (Σa·x)² = ½ · (x₃ − x₁)².
+			// W is theoretically bounded in [0.75, 1].
+			double range = values[n - 1] - values[0];
+			w = 0.5 * range * range / sx2;
+			if (w < 0.75) {
+				w = 0.75;
+			}
+		} else {
+			std::vector<double> m(n);
+			for (idx_t k = 0; k < n; k++) {
+				double frac = (static_cast<double>(k + 1) - 0.375) / (n_d + 0.25);
+				m[k] = stats_duck::NormalQuantile(frac);
+			}
+			double m_sum_sq = 0.0;
+			for (double mv : m) {
+				m_sum_sq += mv * mv;
+			}
+
+			double rsn = 1.0 / std::sqrt(n_d);
+			double a_n = Polyval(C1, 6, rsn) + m[n - 1] / std::sqrt(m_sum_sq);
+			std::vector<double> a(n);
+			a[n - 1] = a_n;
+
+			if (n >= 6) {
+				double a_nm1 = Polyval(C2, 6, rsn) + m[n - 2] / std::sqrt(m_sum_sq);
+				a[n - 2] = a_nm1;
+				double denom = 1.0 - 2.0 * a_n * a_n - 2.0 * a_nm1 * a_nm1;
+				double eps2 = (m_sum_sq - 2.0 * m[n - 1] * m[n - 1] - 2.0 * m[n - 2] * m[n - 2]) / denom;
+				double se = std::sqrt(eps2);
+				for (idx_t k = 2; k + 2 < n; k++) {
+					a[k] = m[k] / se;
+				}
+			} else {
+				// n in {4, 5}: only a_n gets the polynomial correction.
+				double eps2 = (m_sum_sq - 2.0 * m[n - 1] * m[n - 1]) / (1.0 - 2.0 * a_n * a_n);
+				double se = std::sqrt(eps2);
+				for (idx_t k = 1; k + 1 < n; k++) {
+					a[k] = m[k] / se;
+				}
+			}
+			for (idx_t k = 0; k < n / 2; k++) {
+				a[k] = -a[n - 1 - k];
+			}
+
+			double linear = 0.0;
+			for (idx_t k = 0; k < n; k++) {
+				linear += a[k] * values[k];
+			}
+			w = linear * linear / sx2;
+		}
+
+		if (w > 1.0) {
+			w = 1.0;
+		} else if (w < 0.0) {
+			w = 0.0;
+		}
+
+		double pw;
+		if (n == 3) {
+			// AS R94 exact: pw = 1 - (6/π) · acos(√W).
+			constexpr double SIX_OVER_PI = 6.0 / 3.14159265358979323846;
+			double pw_raw = 1.0 - SIX_OVER_PI * std::acos(std::sqrt(w));
+			pw = pw_raw < 0.0 ? 0.0 : (pw_raw > 1.0 ? 1.0 : pw_raw);
+		} else {
+			double y = std::log(1.0 - w);
+			bool saturated = false;
+			double mu = 0.0, sigma = 1.0;
+			if (n <= 11) {
+				double gamma_n = Polyval(G, 2, n_d);
+				if (y >= gamma_n) {
+					// Small-n y-transform saturates: report a floor instead of NaN.
+					pw = SMALL_P;
+					saturated = true;
+				} else {
+					y = -std::log(gamma_n - y);
+					mu = Polyval(C3, 4, n_d);
+					sigma = std::exp(Polyval(C4, 4, n_d));
+				}
+			} else {
+				double log_n = std::log(n_d);
+				mu = Polyval(C5, 4, log_n);
+				sigma = std::exp(Polyval(C6, 3, log_n));
+			}
+			if (!saturated) {
+				double z = (y - mu) / sigma;
+				pw = 1.0 - stats_duck::NormalCDF(z);
+				if (pw < 0.0) {
+					pw = 0.0;
+				}
+				if (pw > 1.0) {
+					pw = 1.0;
+				}
+			}
+		}
+
+		FlatVector::GetData<string_t>(*children[0])[idx] =
+		    StringVector::AddString(*children[0], "Shapiro-Wilk");
+		FlatVector::GetData<double>(*children[1])[idx] = w;
+		FlatVector::GetData<double>(*children[2])[idx] = pw;
+		FlatVector::GetData<int64_t>(*children[3])[idx] = static_cast<int64_t>(n);
+	}
+}
+
+} // namespace
+
 void RegisterJarqueBera(ExtensionLoader &loader) {
 	AggregateFunction fn("jarque_bera", {LogicalType::DOUBLE}, JarqueBeraResultType(),
 	                     AggregateFunction::StateSize<JBState>, JBInit, JBUpdate, JBCombine, JBFinalize,
 	                     FunctionNullHandling::DEFAULT_NULL_HANDLING);
+	loader.RegisterFunction(fn);
+}
+
+void RegisterShapiroWilk(ExtensionLoader &loader) {
+	AggregateFunction fn("shapiro_wilk", {LogicalType::DOUBLE}, SWResultType(),
+	                     AggregateFunction::StateSize<SWState>, SWInit, SWUpdate, SWCombine, SWFinalize,
+	                     FunctionNullHandling::DEFAULT_NULL_HANDLING, nullptr, nullptr, SWDestroy);
 	loader.RegisterFunction(fn);
 }
 

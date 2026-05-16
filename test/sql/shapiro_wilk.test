@@ -1,0 +1,114 @@
+# name: test/sql/shapiro_wilk.test
+# description: Shapiro-Wilk normality test (Royston 1995, AS R94)
+# group: [stats_duck]
+
+require stats_duck
+
+# n=4 reference: shapiro.test(c(0,0,1,1)) in R gives W=0.72863, p=0.02382
+# (we get p=0.02386 — within the AS R94 polynomial-approximation noise).
+statement ok
+CREATE TABLE four AS SELECT * FROM (VALUES (0.0),(0.0),(1.0),(1.0)) AS t(x);
+
+query TTTT
+SELECT (r).test_type,
+       ROUND((r).w_statistic, 5),
+       ROUND((r).p_value, 4),
+       (r).n
+FROM (SELECT shapiro_wilk(x) AS r FROM four)
+----
+Shapiro-Wilk	0.72863	0.0239	4
+
+# n=5 1..5 — symmetric integer sequence, very normal-looking.
+# R: shapiro.test(c(1,2,3,4,5)) → W=0.98676, p=0.9672.
+query TTT
+SELECT ROUND((r).w_statistic, 5),
+       ROUND((r).p_value, 4),
+       (r).n
+FROM (SELECT shapiro_wilk(x::DOUBLE) AS r FROM (SELECT range AS x FROM range(1, 6)) AS t)
+----
+0.98676	0.9672	5
+
+# n=10 1..10 — R: shapiro.test(1:10) → W=0.97016, p=0.8924.
+query TTT
+SELECT ROUND((r).w_statistic, 5),
+       ROUND((r).p_value, 3),
+       (r).n
+FROM (SELECT shapiro_wilk(x::DOUBLE) AS r FROM (SELECT range AS x FROM range(1, 11)) AS t)
+----
+0.97016	0.893	10
+
+# Outlier at 100 — clearly non-normal, p must be tiny.
+query TT
+SELECT (r).w_statistic < 0.5,
+       (r).p_value < 1e-4
+FROM (SELECT shapiro_wilk(x) AS r
+      FROM (VALUES (1.0),(2.0),(3.0),(4.0),(5.0),(6.0),(7.0),(8.0),(9.0),(100.0)) AS t(x))
+----
+true	true
+
+# n=3 minimum case. Theoretically W in [0.75, 1] for n=3.
+# x=[0,1,2] is the "least-non-normal" n=3 case → W=1, p=1.
+query TT
+SELECT (r).w_statistic, (r).p_value
+FROM (SELECT shapiro_wilk(x) AS r FROM (VALUES (0.0),(1.0),(2.0)) AS t(x))
+----
+1.0	1.0
+
+# x=[0,0,1] is the most-skewed n=3 case → W=0.75, p=0.
+query TT
+SELECT (r).w_statistic, (r).p_value
+FROM (SELECT shapiro_wilk(x) AS r FROM (VALUES (0.0),(0.0),(1.0)) AS t(x))
+----
+0.75	0.0
+
+# n < 3 returns NULL
+query T
+SELECT shapiro_wilk(x) FROM (VALUES (1.0),(2.0)) AS t(x)
+----
+NULL
+
+# All values identical: W=1, p=1 (vacuously normal)
+query TT
+SELECT (r).w_statistic, (r).p_value
+FROM (SELECT shapiro_wilk(x) AS r FROM (VALUES (5.0),(5.0),(5.0),(5.0)) AS t(x))
+----
+1.0	1.0
+
+# NULLs are skipped
+query T
+SELECT (r).n
+FROM (SELECT shapiro_wilk(x) AS r
+      FROM (VALUES (1.0),(NULL),(2.0),(NULL),(3.0),(4.0),(5.0)) AS t(x))
+----
+5
+
+# W is in [0, 1] for any valid input
+query T
+SELECT (r).w_statistic >= 0.0 AND (r).w_statistic <= 1.0
+FROM (SELECT shapiro_wilk(x::DOUBLE) AS r FROM (SELECT range AS x FROM range(1, 21)) AS t)
+----
+true
+
+# GROUP BY: per-group SW
+statement ok
+CREATE TABLE grouped AS SELECT * FROM (VALUES
+    ('a', 1.0),('a', 2.0),('a', 3.0),('a', 4.0),('a', 5.0),
+    ('b', 1.0),('b', 1.0),('b', 1.0),('b', 1.0),('b', 100.0)
+) AS t(g, x);
+
+# Group 'a' is symmetric → high p; group 'b' has an outlier → very low p
+query TT
+SELECT g, (shapiro_wilk(x)).p_value > 0.5
+FROM grouped GROUP BY g ORDER BY g
+----
+a	true
+b	false
+
+# Large-n branch (n in [12, 5000]) — different p-value polynomial.
+# R: shapiro.test(1:20) → W=0.9603752, p=0.5513717.
+query TT
+SELECT ROUND((r).w_statistic, 5),
+       ROUND((r).p_value, 4)
+FROM (SELECT shapiro_wilk(x::DOUBLE) AS r FROM (SELECT range AS x FROM range(1, 21)) AS t)
+----
+0.96038	0.5514

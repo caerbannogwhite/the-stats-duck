@@ -12,6 +12,15 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- `shapiro_wilk(x)` — Shapiro-Wilk normality test via Royston (1995)'s AS R94
+  polynomial approximation. Valid for n in [3, 5000]. The same algorithm
+  shipped by scipy.stats.shapiro and R's shapiro.test, with no exact
+  coefficient table to keep around — modern best practice for any n. W and
+  p-values agree with R to 7+ decimal places on R's reference cases
+  (W=0.96038, p=0.5514 for shapiro.test(1:20), exact match). Special-cased
+  for n=3 (exact arcsine formula) and the small-n branch n in [4, 11] (log-
+  of-log transformation per AS R94). Returns
+  `STRUCT(test_type, w_statistic, p_value, n)`.
 - `anderson_darling(x)` — Anderson-Darling normality test against the fitted
   normal (mean and variance estimated from the sample, "case 3"). Buffer-based
   aggregate: state holds the values; sort + scan happen in Finalize. Statistic

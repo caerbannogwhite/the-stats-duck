@@ -33,6 +33,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	RegisterKendallTest(loader);
 	RegisterSignTest(loader);
 	RegisterJarqueBera(loader);
+	RegisterShapiroWilk(loader);
 	RegisterAndersonDarling(loader);
 	RegisterAnovaOneway(loader);
 	RegisterChiSquareTests(loader);
