@@ -10,6 +10,18 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+### Added
+
+- ggsql: `TITLE '<text>' [SUBTITLE '<text>']` clause appended after any
+  `SCALE` clauses. Emitted as a Vega-Lite `TitleParams` object (always object
+  form, even without subtitle) so consumers don't need to handle both string
+  and object shapes. `SUBTITLE` without a preceding `TITLE` is a parse error.
+- ggsql: `SCALE <channel> LABEL '<text>'` operator injects an `axis.title`
+  block alongside the channel's existing `scale` block. Composes with
+  `TO` / `ZERO` / `DOMAIN` on the same channel and with `FACET BY` and
+  multi-layer specs. LABEL on an unmapped channel is a silent no-op, matching
+  the existing `SCALE` semantics.
+
 ## [0.4.0-nine-pence] - 2026-05-19
 
 Two themes for v0.4: rounding out the normality-test family that v0.3

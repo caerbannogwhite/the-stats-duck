@@ -14,6 +14,8 @@
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/parser/parser_extension.hpp"
 
+#include <algorithm>
+
 namespace duckdb {
 namespace ggsql {
 
@@ -66,25 +68,34 @@ bool HasFacet(const VisualizeStatement &stmt) {
 	return false;
 }
 
-// Inject `,"scale":{<merged-properties>}` into each encoding channel that has
-// at least one matching ScaleSpec. Relies on the current encoding format using
-// only primitive sub-properties (no nested objects), so the first '}' after the
-// channel's opening '{' is the closing brace. Multiple SCALE clauses on the
-// same channel merge into one scale object.
+// Inject channel sub-objects (e.g. `,"scale":{...}` for TO/ZERO/DOMAIN,
+// `,"axis":{...}` for LABEL) into each encoding channel that has at least one
+// matching ScaleSpec. Relies on the current encoding format using only
+// primitive sub-properties at this point (no nested objects), so the first '}'
+// after the channel's opening '{' is its closing brace. Multiple ScaleSpec
+// entries on the same (channel, sub_object) merge into one block; multiple
+// sub_objects on the same channel each produce their own block.
 string ApplyScales(string layer_body, const vector<ScaleSpec> &scales) {
-	// Preserve user-specified order while grouping by channel.
-	std::map<string, string> merged; // channel → comma-separated "key":value list
-	std::vector<string> order;
+	// channel → sub_object → "k1":v1,"k2":v2  (within-block insertion order preserved)
+	std::map<string, std::map<string, string>> by_channel;
+	std::vector<string> channel_order;
+	std::map<string, std::vector<string>> sub_obj_order; // per-channel sub_object insertion order
 	for (const auto &scale : scales) {
-		auto it = merged.find(scale.aesthetic);
-		if (it == merged.end()) {
-			merged[scale.aesthetic] = "\"" + scale.property + "\":" + scale.value_json;
-			order.push_back(scale.aesthetic);
-		} else {
-			it->second += ",\"" + scale.property + "\":" + scale.value_json;
+		auto &props = by_channel[scale.aesthetic][scale.sub_object];
+		if (!props.empty()) {
+			props += ",";
+		}
+		props += "\"" + scale.property + "\":" + scale.value_json;
+		auto &ch_subs = sub_obj_order[scale.aesthetic];
+		if (std::find(ch_subs.begin(), ch_subs.end(), scale.sub_object) == ch_subs.end()) {
+			ch_subs.push_back(scale.sub_object);
+		}
+		if (std::find(channel_order.begin(), channel_order.end(), scale.aesthetic) ==
+		    channel_order.end()) {
+			channel_order.push_back(scale.aesthetic);
 		}
 	}
-	for (const auto &channel : order) {
+	for (const auto &channel : channel_order) {
 		string needle = "\"" + channel + "\":{";
 		size_t pos = layer_body.find(needle);
 		if (pos == string::npos) {
@@ -95,10 +106,28 @@ string ApplyScales(string layer_body, const vector<ScaleSpec> &scales) {
 		if (close_brace == string::npos) {
 			continue;
 		}
-		string injection = ",\"scale\":{" + merged[channel] + "}";
+		string injection;
+		for (const auto &sub_obj : sub_obj_order[channel]) {
+			injection += ",\"" + sub_obj + "\":{" + by_channel[channel][sub_obj] + "}";
+		}
 		layer_body.insert(close_brace, injection);
 	}
 	return layer_body;
+}
+
+// Build the Vega-Lite title block. Returns "" if no title is set. The block is
+// always emitted as a TitleParams object (not a bare string) so that subtitle
+// can be added without changing the shape; this keeps fixture output stable.
+string BuildTitleBlock(const VisualizeStatement &stmt) {
+	if (stmt.title.empty()) {
+		return "";
+	}
+	string out = ",\"title\":{\"text\":\"" + JsonEscape(stmt.title) + "\"";
+	if (!stmt.subtitle.empty()) {
+		out += ",\"subtitle\":\"" + JsonEscape(stmt.subtitle) + "\"";
+	}
+	out += "}";
+	return out;
 }
 
 // Replace the rendered "type":"..." inside the targeted channel with the user's
@@ -150,6 +179,8 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 	}
 	CompiledResult out;
 
+	string title_block = BuildTitleBlock(stmt);
+
 	if (stmt.layers.size() == 1) {
 		// Single layer: emit canonical Vega-Lite single-view shape (top-level
 		// data + mark + encoding). When faceted, wrap mark/encoding inside a
@@ -171,6 +202,7 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 		} else {
 			spec += rendered.layer_body;
 		}
+		spec += title_block;
 		spec += "}";
 
 		out.spec_json = std::move(spec);
@@ -207,6 +239,7 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 	} else {
 		spec += layer_array;
 	}
+	spec += title_block;
 	spec += "}";
 	out.spec_json = std::move(spec);
 	return out;

@@ -1,0 +1,119 @@
+# name: test/sql/ggsql_visualize_titles.test
+# description: v0.5 — TITLE/SUBTITLE clause and SCALE <ch> LABEL '...' axis-title operator
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES (39.1, 18.7, 'Adelie'), (39.5, 17.4, 'Adelie'), (44.0, 18.0, 'Gentoo')) AS t(bill_len, bill_dep, species);
+
+# ─── TITLE ────────────────────────────────────────────────────────────────────
+
+# Bare TITLE — emitted as a TitleParams object so SUBTITLE can be added later
+# without changing the spec shape.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point TITLE 'Penguin bill dimensions'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}},"title":{"text":"Penguin bill dimensions"}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# TITLE + SUBTITLE — both appear in the title block.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point TITLE 'Bill dimensions' SUBTITLE 'Source: Palmer Station LTER'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}},"title":{"text":"Bill dimensions","subtitle":"Source: Palmer Station LTER"}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# TITLE composes with SCALE — title block sits after encoding, scales inside channels.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point SCALE color TO viridis TITLE 'Colored by species'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}},"title":{"text":"Colored by species"}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins'}
+
+# TITLE composes with FACET — facet wraps the encoding, title goes at top-level.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species TITLE 'Per-species view'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"field":"facet","type":"nominal"},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},"title":{"text":"Per-species view"}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet FROM penguins'}
+
+# TITLE on a multi-layer spec lands at the outer level, not per-layer.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW line TITLE 'Points and line'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}],"title":{"text":"Points and line"}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins', layer_1='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y FROM penguins) ORDER BY x'}
+
+# SQL '' escape inside a title round-trips to a single quote.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point TITLE 'Bill''s mom'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}},"title":{"text":"Bill's mom"}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Embedded double-quote in the title is JSON-escaped.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point TITLE 'He said "hi"'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}},"title":{"text":"He said \"hi\""}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# ─── SCALE LABEL ──────────────────────────────────────────────────────────────
+
+# Single axis label injects `"axis":{"title":...}` alongside the channel's field/type.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE x LABEL 'Bill length (mm)'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative","axis":{"title":"Bill length (mm)"}},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Two LABEL clauses target different channels — each gets its own axis block.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE x LABEL 'Bill length (mm)' SCALE y LABEL 'Bill depth (mm)'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative","axis":{"title":"Bill length (mm)"}},"y":{"field":"y","type":"quantitative","axis":{"title":"Bill depth (mm)"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# LABEL coexists with SCALE TO/DOMAIN on the same channel — scale and axis are
+# both injected into the channel block.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE x DOMAIN 30 50 SCALE x LABEL 'Bill length (mm)'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative","scale":{"domain":[30,50]},"axis":{"title":"Bill length (mm)"}},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# LABEL on an unmapped channel is a silent no-op (matches existing SCALE behavior).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE color LABEL 'Species'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# LABEL + TITLE together — exercises both injection paths in one spec.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE x LABEL 'Bill length (mm)' SCALE y LABEL 'Bill depth (mm)' TITLE 'Penguin bill dimensions' SUBTITLE 'n=3'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative","axis":{"title":"Bill length (mm)"}},"y":{"field":"y","type":"quantitative","axis":{"title":"Bill depth (mm)"}}},"title":{"text":"Penguin bill dimensions","subtitle":"n=3"}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# ─── Error cases ──────────────────────────────────────────────────────────────
+
+# SUBTITLE without preceding TITLE.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SUBTITLE 'orphan'
+----
+SUBTITLE requires a preceding TITLE clause
+
+# TITLE with no text argument.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point TITLE
+----
+Expected title text after 'TITLE'
+
+# SUBTITLE with no text argument.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point TITLE 'ok' SUBTITLE
+----
+Expected subtitle text after 'SUBTITLE'
+
+# SCALE LABEL with no label argument.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE x LABEL
+----
+Expected axis label after 'SCALE <aesthetic> LABEL'
+
+# Updated SCALE-op error message lists LABEL.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point SCALE x BOGUS foo
+----
+Unknown SCALE operator 'BOGUS' (expected TO / ZERO / DOMAIN / LABEL)

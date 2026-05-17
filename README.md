@@ -227,7 +227,8 @@ VISUALIZE <expr> AS <aesthetic> [: <type>] (, <expr> AS <aesthetic> ...)
 FROM <table>
 DRAW <mark> (DRAW <mark>)*
 [FACET BY <expr> [ROWS | COLS]]
-[SCALE <channel> {TO <scheme> | ZERO true|false | DOMAIN <lo> <hi>}]*
+[SCALE <channel> {TO <scheme> | ZERO true|false | DOMAIN <lo> <hi> | LABEL '<text>'}]*
+[TITLE '<text>' [SUBTITLE '<text>']]
 ```
 
 **Marks:** `point`, `line`, `bar`, `histogram`, `text`, `area`, `rule`, `tick`,
@@ -241,6 +242,13 @@ ship their own marks without modifying stats_duck.
 **Type overrides:** append `:quantitative`, `:ordinal`, `:nominal`, or
 `:temporal` to an aesthetic to force its Vega-Lite type
 (e.g. `year AS color:ordinal`).
+
+**Axis labels:** `SCALE x LABEL 'Bill length (mm)'` injects an `axis.title` into
+the channel; pairs with `TO` / `ZERO` / `DOMAIN` on the same channel.
+
+**Titles:** `TITLE 'Plot title' [SUBTITLE 'Plot subtitle']` appears once per
+spec, after `SCALE` clauses. Always emitted as a Vega-Lite `TitleParams` object
+so a subtitle can be added without reshaping consumer code.
 
 ## SAS compatibility
 
