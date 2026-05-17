@@ -194,6 +194,79 @@ MarkResult RenderBoxplot(const MarkContext &ctx) {
 	return r;
 }
 
+MarkResult RenderHeatmap(const MarkContext &ctx) {
+	// Rect mark with categorical-by-default x/y and quantitative color. Both
+	// axes override to ordinal because the typical heatmap (correlation matrix,
+	// contingency table, factor-by-factor counts) uses discrete bins; users
+	// who want a continuous-binned heatmap can type-override the channel back.
+	MarkResult r;
+	r.layer_body = "\"mark\":\"rect\",\"encoding\":" +
+	               BuildEncoding(ctx, kStandardChannels,
+	                             {{"x", "ordinal"}, {"y", "ordinal"}, {"color", "quantitative"}});
+	r.data_sql = ctx.projected_sql;
+	return r;
+}
+
+// Build a "groupby":["color"] fragment iff the user mapped the color aesthetic.
+// Used by density / regression transforms so multi-curve overlays work without
+// an extra clause.
+string BuildGroupbyExtra(const MarkContext &ctx) {
+	if (HasAesthetic(ctx, "color")) {
+		return ",\"groupby\":[\"color\"]";
+	}
+	return "";
+}
+
+// Build optional-channel fragments (color, opacity, ...) for marks that splice
+// their own x/y encoding (histogram / density / regression). Returns "" if no
+// optional channels are mapped; otherwise the leading "," is included so the
+// caller can concatenate directly.
+string BuildOptionalChannels(const MarkContext &ctx) {
+	string out;
+	for (const auto &ch : kStandardChannels) {
+		string name = ch.name;
+		if (name == "x" || name == "y") {
+			continue;
+		}
+		string fragment = BuildChannel(ctx, name, ch.vega_type, "");
+		if (!fragment.empty()) {
+			out += "," + fragment;
+		}
+	}
+	return out;
+}
+
+MarkResult RenderDensity(const MarkContext &ctx) {
+	// Vega-Lite density transform consumes the underlying field `x` and emits
+	// fields `value` (x-axis) and `density` (y-axis). When the user mapped a
+	// color aesthetic, group by it to produce one density curve per level.
+	string transform = "\"transform\":[{\"density\":\"x\"" + BuildGroupbyExtra(ctx) + "}]";
+	string encoding = "{\"x\":{\"field\":\"value\",\"type\":\"quantitative\"},"
+	                  "\"y\":{\"field\":\"density\",\"type\":\"quantitative\"}";
+	encoding += BuildOptionalChannels(ctx);
+	encoding += "}";
+	MarkResult r;
+	r.layer_body = transform + ",\"mark\":\"area\",\"encoding\":" + encoding;
+	r.data_sql = ctx.projected_sql;
+	return r;
+}
+
+MarkResult RenderRegression(const MarkContext &ctx) {
+	// Vega-Lite regression transform fits y ~ x and emits the same field names
+	// back as the smoothed line. Grouped by color when mapped so each category
+	// gets its own fit line.
+	string transform =
+	    "\"transform\":[{\"regression\":\"y\",\"on\":\"x\"" + BuildGroupbyExtra(ctx) + "}]";
+	string encoding = "{\"x\":{\"field\":\"x\",\"type\":\"quantitative\"},"
+	                  "\"y\":{\"field\":\"y\",\"type\":\"quantitative\"}";
+	encoding += BuildOptionalChannels(ctx);
+	encoding += "}";
+	MarkResult r;
+	r.layer_body = transform + ",\"mark\":\"line\",\"encoding\":" + encoding;
+	r.data_sql = ctx.projected_sql;
+	return r;
+}
+
 MarkResult RenderHistogram(const MarkContext &ctx) {
 	// Histogram's x is binned and y is computed (aggregate:count, no field).
 	// Optional channels (color, opacity, ...) come from kStandardChannels but x
@@ -275,6 +348,13 @@ void RegisterBuiltinMarks(ExtensionLoader &loader) {
 	RegisterMark(loader, "errorbar", {"x", "y"}, RenderErrorbar);
 	RegisterMark(loader, "errorband", {"x", "y"}, RenderErrorband);
 	RegisterMark(loader, "boxplot", {"x", "y"}, RenderBoxplot);
+	// Heatmap (categorical-axis rect), density (KDE area), and regression
+	// (linear-fit line). Density and regression rely on Vega-Lite transforms,
+	// so they ignore the underlying row order — safe to emit projected_sql
+	// directly. Color is the grouping aesthetic for both transforms.
+	RegisterMark(loader, "heatmap", {"x", "y", "color"}, RenderHeatmap);
+	RegisterMark(loader, "density", {"x"}, RenderDensity);
+	RegisterMark(loader, "regression", {"x", "y"}, RenderRegression);
 }
 
 } // namespace ggsql

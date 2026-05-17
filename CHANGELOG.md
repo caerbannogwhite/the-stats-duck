@@ -12,6 +12,13 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- ggsql: three new marks — `heatmap`, `density`, `regression`. `heatmap` is a
+  `rect` mark with ordinal x/y and quantitative color (correlation matrices,
+  contingency tables). `density` is a KDE via Vega-Lite's `density` transform
+  on the `x` aesthetic; groups by `color` if mapped (one curve per level).
+  `regression` is a `line` mark via Vega-Lite's `regression` transform fitting
+  `y ~ x`; groups by `color` if mapped. Pairs naturally with `DRAW point
+  DRAW regression` for scatter-with-fit overlays.
 - ggsql: `TITLE '<text>' [SUBTITLE '<text>']` clause appended after any
   `SCALE` clauses. Emitted as a Vega-Lite `TitleParams` object (always object
   form, even without subtitle) so consumers don't need to handle both string

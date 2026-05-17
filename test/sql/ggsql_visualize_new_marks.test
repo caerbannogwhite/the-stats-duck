@@ -1,0 +1,97 @@
+# name: test/sql/ggsql_visualize_new_marks.test
+# description: v0.5 — heatmap (rect), density (KDE area + transform), regression (line + fit transform)
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS
+SELECT * FROM (VALUES
+    (39.1, 18.7, 'Adelie'), (39.5, 17.4, 'Adelie'),
+    (44.0, 18.0, 'Gentoo'), (45.2, 14.5, 'Gentoo'),
+    (50.0, 19.3, 'Chinstrap')
+) AS t(bill_len, bill_dep, species);
+
+# ─── Heatmap ─────────────────────────────────────────────────────────────────
+
+# Heatmap maps x ordinal, y ordinal, color quantitative — typical correlation
+# / contingency-table shape. mark = rect.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, bill_len AS color FROM penguins DRAW heatmap
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"rect","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"ordinal"},"color":{"field":"color","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, bill_len AS color FROM penguins'}
+
+# Heatmap composes with SCALE TO for the color scheme — typical viridis heatmap.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, bill_len AS color FROM penguins DRAW heatmap SCALE color TO viridis
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"rect","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"ordinal"},"color":{"field":"color","type":"quantitative","scale":{"scheme":"viridis"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, bill_len AS color FROM penguins'}
+
+# Heatmap requires color — clean missing-aesthetic error.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW heatmap
+----
+'heatmap' requires 'color' aesthetic
+
+# Per-channel type override still works on a heatmap (force x back to quantitative
+# for a binned heatmap of a continuous variable).
+query TT
+VISUALIZE bill_len AS x:quantitative, bill_dep AS y, bill_len AS color FROM penguins DRAW heatmap
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"rect","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"ordinal"},"color":{"field":"color","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, bill_len AS color FROM penguins'}
+
+# ─── Density ─────────────────────────────────────────────────────────────────
+
+# Bare density: Vega-Lite density transform produces "value"/"density" output
+# fields which get bound to x/y axes. mark = area.
+query TT
+VISUALIZE bill_len AS x FROM penguins DRAW density
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"transform":[{"density":"x"}],"mark":"area","encoding":{"x":{"field":"value","type":"quantitative"},"y":{"field":"density","type":"quantitative"}}}	{layer_0=SELECT bill_len AS x FROM penguins}
+
+# Density with color → grouped density curves (one per category). The color
+# aesthetic flows into both the transform's groupby and the encoding.
+query TT
+VISUALIZE bill_len AS x, species AS color FROM penguins DRAW density
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"transform":[{"density":"x","groupby":["color"]}],"mark":"area","encoding":{"x":{"field":"value","type":"quantitative"},"y":{"field":"density","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}	{layer_0='SELECT bill_len AS x, species AS color FROM penguins'}
+
+# Density requires x — clean missing-aesthetic error.
+statement error
+VISUALIZE bill_len AS y FROM penguins DRAW density
+----
+'density' requires 'x' aesthetic
+
+# SCALE LABEL still works on density's synthetic y channel — the encoding emits
+# a "y":{...} block regardless of what field it points to.
+query TT
+VISUALIZE bill_len AS x FROM penguins DRAW density SCALE y LABEL 'Density'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"transform":[{"density":"x"}],"mark":"area","encoding":{"x":{"field":"value","type":"quantitative"},"y":{"field":"density","type":"quantitative","axis":{"title":"Density"}}}}	{layer_0=SELECT bill_len AS x FROM penguins}
+
+# ─── Regression ──────────────────────────────────────────────────────────────
+
+# Bare regression: Vega-Lite regression transform fits y ~ x. mark = line.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW regression
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"transform":[{"regression":"y","on":"x"}],"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins'}
+
+# Regression with color → one fit per category.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW regression
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"transform":[{"regression":"y","on":"x","groupby":["color"]}],"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color FROM penguins'}
+
+# Regression requires both x and y.
+statement error
+VISUALIZE bill_len AS x FROM penguins DRAW regression
+----
+'regression' requires 'y' aesthetic
+
+# Multi-layer: scatter + regression overlay — the canonical scatter-with-fit
+# plot. Each layer has the same data but different transforms / marks.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW regression
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"transform":[{"regression":"y","on":"x"}],"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}]}	{layer_0='SELECT bill_len AS x, bill_dep AS y FROM penguins', layer_1='SELECT bill_len AS x, bill_dep AS y FROM penguins'}

@@ -232,9 +232,17 @@ DRAW <mark> (DRAW <mark>)*
 ```
 
 **Marks:** `point`, `line`, `bar`, `histogram`, `text`, `area`, `rule`, `tick`,
-`errorbar`, `errorband`, `boxplot`. Custom marks register as `ggsql_mark_v1_<name>`
-scalar functions and are discovered via DuckDB's catalog, so other extensions can
-ship their own marks without modifying stats_duck.
+`errorbar`, `errorband`, `boxplot`, `heatmap`, `density`, `regression`. Custom
+marks register as `ggsql_mark_v1_<name>` scalar functions and are discovered
+via DuckDB's catalog, so other extensions can ship their own marks without
+modifying stats_duck.
+
+`heatmap` is a `rect` mark with ordinal x/y and quantitative color (correlation
+matrices, contingency tables). `density` runs Vega-Lite's KDE on the `x`
+aesthetic, grouped by `color` if mapped (one curve per category). `regression`
+fits a linear `y ~ x` model server-side via Vega-Lite's regression transform,
+also grouped by `color`. Use `DRAW point DRAW regression` for a scatter-with-
+fit overlay.
 
 **Aesthetic channels:** `x`, `y`, `color`, `fill`, `stroke`, `shape`, `size`,
 `opacity`, `tooltip`, `text`, `x2`, `y2`. Unknown channels are silently dropped.
