@@ -189,3 +189,85 @@ statement error
 SELECT * FROM table_one('patients', variables := ['age'], by := ['arm', 'bogus'])
 ----
 'by' column 'bogus' not found
+
+# ─── force_categorical / force_numerical overrides ──────────────────────────
+
+# Fixture: stage is an INTEGER (catalog → numeric) but really categorical.
+# height is VARCHAR holding numeric strings (catalog → categorical) but really
+# numeric.
+statement ok
+CREATE TABLE staged AS SELECT * FROM (VALUES
+    (1, '1.65'), (2, '1.80'), (2, '1.72'), (3, '1.55'), (3, '1.90')
+) AS t(stage, height);
+
+# Without overrides: stage is numeric (mean/sd row), height is categorical
+# (one row per distinct string).
+query TT
+SELECT statistic, display FROM table_one('staged', variables := ['stage'])
+WHERE statistic = 'mean (sd)'
+----
+mean (sd)	2.2 (0.8)
+
+query TT
+SELECT level, statistic FROM table_one('staged', variables := ['height'])
+WHERE statistic = 'n (%)' ORDER BY level
+----
+1.55	n (%)
+1.65	n (%)
+1.72	n (%)
+1.80	n (%)
+1.90	n (%)
+Missing	n (%)
+
+# force_categorical flips stage into the categorical branch: per-level n (%)
+# rows instead of mean/sd.
+query TTT
+SELECT level, statistic, display FROM table_one('staged',
+    variables := ['stage'], force_categorical := ['stage'])
+ORDER BY level
+----
+1	n (%)	1 (20.0%)
+2	n (%)	2 (40.0%)
+3	n (%)	2 (40.0%)
+Missing	n (%)	0 (0.0%)
+
+# force_numerical flips height into the numeric branch: mean/sd over the
+# parsed DOUBLEs.
+query TT
+SELECT statistic, display FROM table_one('staged',
+    variables := ['height'], force_numerical := ['height'])
+WHERE statistic IN ('n', 'mean (sd)') ORDER BY statistic
+----
+mean (sd)	1.7 (0.1)
+n	5
+
+# Both overrides at once on different variables.
+query TTT rowsort
+SELECT variable, statistic, display FROM table_one('staged',
+    variables := ['stage', 'height'],
+    force_categorical := ['stage'],
+    force_numerical := ['height'])
+WHERE statistic IN ('mean (sd)', 'n')
+----
+height	mean (sd)	1.7 (0.1)
+height	n	5
+
+# A variable in both override lists is rejected.
+statement error
+SELECT * FROM table_one('staged', variables := ['stage'],
+    force_categorical := ['stage'], force_numerical := ['stage'])
+----
+'stage' is listed in both force_categorical and force_numerical
+
+# An override entry that isn't in `variables` is rejected (catches typos).
+statement error
+SELECT * FROM table_one('staged', variables := ['stage'],
+    force_categorical := ['stge'])
+----
+force_categorical entry 'stge' is not in 'variables'
+
+statement error
+SELECT * FROM table_one('staged', variables := ['height'],
+    force_numerical := ['hieght'])
+----
+force_numerical entry 'hieght' is not in 'variables'

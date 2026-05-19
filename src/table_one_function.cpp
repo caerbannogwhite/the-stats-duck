@@ -178,6 +178,48 @@ static unique_ptr<FunctionData> TableOneBind(ClientContext &context, TableFuncti
 		}
 	}
 
+	// Named params: force_categorical / force_numerical — per-variable
+	// classification overrides. Integer columns that are really categorical
+	// (`stage ∈ {1,2,3,4}`, treatment codes, etc.) need force_categorical;
+	// VARCHAR columns holding numeric strings need force_numerical. Each entry
+	// must appear in `variables` so typos surface as bind errors rather than
+	// silent no-ops; the two lists must not overlap.
+	std::vector<std::string> force_categorical;
+	std::vector<std::string> force_numerical;
+	auto read_override = [&](const char *param_name, std::vector<std::string> &out) {
+		auto it = input.named_parameters.find(param_name);
+		if (it == input.named_parameters.end() || it->second.IsNull()) {
+			return;
+		}
+		auto &children = ListValue::GetChildren(it->second);
+		for (auto &c : children) {
+			if (c.IsNull()) {
+				throw BinderException("table_one: '%s' list entries must not be NULL",
+				                      param_name);
+			}
+			out.push_back(c.GetValue<string>());
+		}
+	};
+	read_override("force_categorical", force_categorical);
+	read_override("force_numerical", force_numerical);
+	for (auto &v : force_categorical) {
+		if (std::find(force_numerical.begin(), force_numerical.end(), v) !=
+		    force_numerical.end()) {
+			throw BinderException("table_one: '%s' is listed in both force_categorical "
+			                      "and force_numerical", v);
+		}
+		if (std::find(bd->variables.begin(), bd->variables.end(), v) == bd->variables.end()) {
+			throw BinderException("table_one: force_categorical entry '%s' is not in 'variables'",
+			                      v);
+		}
+	}
+	for (auto &v : force_numerical) {
+		if (std::find(bd->variables.begin(), bd->variables.end(), v) == bd->variables.end()) {
+			throw BinderException("table_one: force_numerical entry '%s' is not in 'variables'",
+			                      v);
+		}
+	}
+
 	// Catalog lookup — get column types so we can classify each variable.
 	auto &catalog = Catalog::GetCatalog(context, INVALID_CATALOG);
 	auto &schema = DEFAULT_SCHEMA;
@@ -192,7 +234,15 @@ static unique_ptr<FunctionData> TableOneBind(ClientContext &context, TableFuncti
 			                      v, bd->data_table);
 		}
 		auto &col = cols.GetColumn(v);
-		bd->is_numeric.push_back(IsNumericKind(col.GetType().id()));
+		bool numeric = IsNumericKind(col.GetType().id());
+		if (std::find(force_categorical.begin(), force_categorical.end(), v) !=
+		    force_categorical.end()) {
+			numeric = false;
+		} else if (std::find(force_numerical.begin(), force_numerical.end(), v) !=
+		           force_numerical.end()) {
+			numeric = true;
+		}
+		bd->is_numeric.push_back(numeric);
 	}
 	for (auto &b : bd->by_columns) {
 		if (!cols.ColumnExists(b)) {
@@ -483,6 +533,8 @@ void RegisterTableOne(ExtensionLoader &loader) {
 	                  TableOneInitGlobal);
 	fn.named_parameters["variables"] = LogicalType::LIST(LogicalType::VARCHAR);
 	fn.named_parameters["by"] = LogicalType::LIST(LogicalType::VARCHAR);
+	fn.named_parameters["force_categorical"] = LogicalType::LIST(LogicalType::VARCHAR);
+	fn.named_parameters["force_numerical"] = LogicalType::LIST(LogicalType::VARCHAR);
 	loader.RegisterFunction(fn);
 }
 

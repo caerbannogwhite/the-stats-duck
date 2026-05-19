@@ -10,6 +10,15 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+### Added
+
+- `table_one`: `force_categorical := [...]` and `force_numerical := [...]`
+  named parameters to override the per-variable auto-classification. Useful
+  for integer columns that are really categorical (e.g. `stage ∈ {1,2,3,4}`,
+  treatment codes) and VARCHAR columns holding numeric strings. Each entry
+  must appear in `variables` (typos surface as bind errors); the two lists
+  must not overlap.
+
 ### Changed
 
 - `table_one`: `by` named parameter is now `LIST<VARCHAR>` instead of

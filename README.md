@@ -171,7 +171,11 @@ Output columns (long format, fixed schema):
   excluded from the stratum breakdown.
 - Variable types are auto-classified from the catalog: integer / floating-
   point types are numeric, everything else (VARCHAR, BOOLEAN, ENUM,
-  date/time) is categorical.
+  date/time) is categorical. Override per-variable with
+  `force_categorical := ['stage']` (integer column that's really a
+  category) or `force_numerical := ['height']` (VARCHAR column holding
+  numeric strings). Entries must appear in `variables`, and the two lists
+  must not overlap.
 
 Pivot to wide for display:
 
