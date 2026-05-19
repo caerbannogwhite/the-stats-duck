@@ -10,6 +10,17 @@ that name is preserved across releases for backward compatibility.
 
 ## [Unreleased]
 
+### Changed
+
+- `table_one`: `by` named parameter is now `LIST<VARCHAR>` instead of
+  `VARCHAR`. Single-column callers need to wrap the column name in a list:
+  `by := ['arm']` instead of `by := 'arm'`. Multi-column stratification
+  (Cartesian product of distinct value tuples across the listed columns,
+  e.g. `by := ['species', 'sex']`) is the motivation — the v0.4 single-
+  column form had no place to grow. Stratum labels join values with
+  `' / '` in declared order (e.g. `'Adelie / female'`); rows where any
+  by-column is NULL are excluded from the breakdown.
+
 ### Added
 
 - ggsql: three new marks — `heatmap`, `density`, `regression`. `heatmap` is a

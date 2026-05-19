@@ -151,7 +151,7 @@ gives Q1=1.5 / Q3=3.5 (matching SAS PROC MEANS).
 SELECT * FROM table_one(
     'patients',
     variables := ['age', 'sex', 'bmi'],
-    by := 'arm'           -- optional
+    by := ['arm']         -- optional; pass multiple columns for cross-stratification
 );
 ```
 
@@ -160,10 +160,15 @@ Output columns (long format, fixed schema):
 
 - Each numeric variable yields rows for `n`, `missing`, `mean (sd)`,
   `median [q1, q3]`, `min, max` — `level` is NULL.
-- Each categorical variable yields one row per level with `n (%)` and an
-  optional trailing `missing` row.
-- `stratum` is `'Overall'` when `by` is unset, and `'Overall'` plus one
-  value per distinct `by` value otherwise.
+- Each categorical variable yields one row per level with `n (%)` plus a
+  trailing `Missing` level row that is always emitted (filter with
+  `WHERE level <> 'Missing'` if you don't want it). All level percentages
+  share the stratum-total denominator so they sum to 100%.
+- `stratum` is `'Overall'` when `by` is unset / empty; otherwise the Cartesian
+  product of distinct value tuples across the listed by-columns, labelled
+  by joining values with `' / '` in declared order (e.g. `'Adelie / female'`
+  for `by := ['species', 'sex']`). Rows where any by-column is NULL are
+  excluded from the stratum breakdown.
 - Variable types are auto-classified from the catalog: integer / floating-
   point types are numeric, everything else (VARCHAR, BOOLEAN, ENUM,
   date/time) is categorical.
@@ -171,7 +176,7 @@ Output columns (long format, fixed schema):
 Pivot to wide for display:
 
 ```sql
-PIVOT table_one('patients', variables := ['age', 'sex'], by := 'arm')
+PIVOT table_one('patients', variables := ['age', 'sex'], by := ['arm'])
     ON stratum USING first(display)
     GROUP BY variable, level, statistic;
 ```

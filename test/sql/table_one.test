@@ -69,7 +69,7 @@ Missing	n (%)	1 (25.0%)
 # Overall is always first; then strata alphabetical. For arm='A', age has
 # 4 valid values [54.2, 61.0, 45.7, 58.3] → mean=54.8, sd≈6.7.
 query TTT
-SELECT statistic, stratum, display FROM table_one('patients', variables := ['age'], by := 'arm')
+SELECT statistic, stratum, display FROM table_one('patients', variables := ['age'], by := ['arm'])
 WHERE statistic = 'mean (sd)' ORDER BY stratum
 ----
 mean (sd)	A	54.8 (6.7)
@@ -78,7 +78,7 @@ mean (sd)	Overall	55.6 (7.2)
 
 # Categorical with by — each level (including Missing) emitted once per stratum.
 query TTT
-SELECT level, statistic, stratum FROM table_one('patients', variables := ['sex'], by := 'arm')
+SELECT level, statistic, stratum FROM table_one('patients', variables := ['sex'], by := ['arm'])
 WHERE statistic = 'n (%)' ORDER BY stratum, level
 ----
 F	n (%)	A
@@ -94,7 +94,7 @@ Missing	n (%)	Overall
 # Each by-stratum's percentages sum to 100% within the stratum (with the
 # Missing row always present, even when its count is zero).
 query T
-SELECT display FROM table_one('patients', variables := ['sex'], by := 'arm')
+SELECT display FROM table_one('patients', variables := ['sex'], by := ['arm'])
 WHERE stratum = 'A' ORDER BY level
 ----
 2 (50.0%)
@@ -125,11 +125,67 @@ SELECT * FROM table_one('does_not_exist', variables := ['age'])
 Table
 
 statement error
-SELECT * FROM table_one('patients', variables := [], by := 'arm')
+SELECT * FROM table_one('patients', variables := [], by := ['arm'])
 ----
 'variables' must not be empty
 
 statement error
-SELECT * FROM table_one('patients', variables := ['age'], by := 'missing_col')
+SELECT * FROM table_one('patients', variables := ['age'], by := ['missing_col'])
 ----
 'by' column 'missing_col' not found
+
+# ─── Multi-column `by` ──────────────────────────────────────────────────────
+
+# Two-column stratification: Cartesian product of distinct (arm, sex) tuples.
+# Stratum label joins values in declared order with " / ". Every arm × sex
+# combination in the patients fixture has at least one row, so all four
+# tuples appear alongside Overall.
+query T rowsort
+SELECT DISTINCT stratum FROM table_one('patients',
+    variables := ['age'], by := ['arm', 'sex'])
+----
+A / F
+A / M
+B / F
+B / M
+Overall
+
+# Per-stratum numeric summary picks up the right subset. For arm=A, sex=F:
+# ages 54.2 and 61.0 → mean 57.6, sd ≈ 4.8.
+query TT
+SELECT statistic, display FROM table_one('patients',
+    variables := ['age'], by := ['arm', 'sex'])
+WHERE stratum = 'A / F' AND statistic IN ('n', 'mean (sd)') ORDER BY statistic
+----
+mean (sd)	57.6 (4.8)
+n	2
+
+# Three-or-more by columns work the same way (no special-cased limit).
+# Here arm × sex × (a constant-1 column) collapses back to arm × sex strata
+# with a "1" tail on every label.
+statement ok
+CREATE TABLE patients_const AS SELECT *, 1 AS site FROM patients;
+
+query T rowsort
+SELECT DISTINCT stratum FROM table_one('patients_const',
+    variables := ['age'], by := ['arm', 'sex', 'site'])
+----
+A / F / 1
+A / M / 1
+B / F / 1
+B / M / 1
+Overall
+
+# Empty `by` list is equivalent to no `by` — only the Overall stratum.
+query T rowsort
+SELECT DISTINCT stratum FROM table_one('patients',
+    variables := ['age'], by := [])
+----
+Overall
+
+# Missing column inside a multi-column `by` is rejected the same way as
+# the single-column case.
+statement error
+SELECT * FROM table_one('patients', variables := ['age'], by := ['arm', 'bogus'])
+----
+'by' column 'bogus' not found
