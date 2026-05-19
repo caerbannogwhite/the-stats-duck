@@ -55,6 +55,8 @@ diagnostics, multiple-testing corrections, and more distribution families.
 | `jarque_bera(column)`                                                 | Jarque-Bera normality test                   |
 | `shapiro_wilk(column)`                                                | Shapiro-Wilk normality test (Royston AS R94) |
 | `anderson_darling(column)`                                            | Anderson-Darling normality test              |
+| `ks_test_1samp(column)`                                               | Kolmogorov-Smirnov one-sample (vs fitted normal) |
+| `ks_test_2samp(column1, column2)`                                     | Kolmogorov-Smirnov two-sample                |
 | `sign_test_1samp(column, [mu], [alternative])`                        | Sign test on the median                      |
 | `sign_test_paired(column1, column2, [alternative])`                   | Paired sign test                             |
 
@@ -94,6 +96,10 @@ p-value, and relevant effect sizes / confidence intervals.
 **Anderson-Darling:** `test_type`, `a_squared`, `a_squared_adjusted`, `p_value`, `n`
 
 **Shapiro-Wilk:** `test_type`, `w_statistic`, `p_value`, `n`
+
+**KS one-sample:** `test_type`, `d_statistic`, `p_value`, `n`
+
+**KS two-sample:** `test_type`, `d_statistic`, `p_value`, `n_x`, `n_y`
 
 **Sign test:** `test_type`, `m_statistic`, `n_pos`, `n_neg`, `n_zero`, `p_value`, `alternative`, `n`
 

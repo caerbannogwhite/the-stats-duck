@@ -12,6 +12,7 @@
 #include "adjust_p_function.hpp"
 #include "table_one_function.hpp"
 #include "normality_function.hpp"
+#include "ks_test_function.hpp"
 #include "anova_function.hpp"
 #include "chisq_function.hpp"
 #include "read_stat_function.hpp"
@@ -37,6 +38,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	RegisterJarqueBera(loader);
 	RegisterShapiroWilk(loader);
 	RegisterAndersonDarling(loader);
+	RegisterKsTest1Samp(loader);
+	RegisterKsTest2Samp(loader);
 	RegisterAnovaOneway(loader);
 	RegisterChiSquareTests(loader);
 

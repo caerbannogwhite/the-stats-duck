@@ -12,6 +12,22 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- **Kolmogorov-Smirnov tests.** Two new aggregates:
+
+  - `ks_test_1samp(x)` — one-sample KS against the fitted normal
+    `N(mean(x), sd(x))`. Returns `STRUCT(test_type, d_statistic, p_value, n)`.
+    Buffer-based aggregate; valid for `n >= 3`. P-value via the asymptotic
+    Kolmogorov distribution with Stephens (1970) small-sample correction.
+    Because mu/sigma are estimated from the sample the p-value is
+    **conservative** — pair with `shapiro_wilk` / `anderson_darling` when
+    normality is the primary question.
+  - `ks_test_2samp(x, y)` — two-sample KS on whether `x` and `y` come from
+    the same underlying distribution. Returns
+    `STRUCT(test_type, d_statistic, p_value, n_x, n_y)`. Asymptotic p-value
+    evaluated at the effective sample size `n_x*n_y/(n_x+n_y)`. Per-column
+    NULL handling (NULL in `x` doesn't drop the value from `y` on the same
+    row), matching `ttest_2samp` semantics.
+
 - `table_one`: new `p_value` output column carrying the between-group test
   result. NULL when no `by` is set or there's only one stratum. Numeric
   variables use one-way ANOVA via `anova_oneway(value, group)`; categorical

@@ -1,0 +1,109 @@
+# name: test/sql/ks_test.test
+# description: Kolmogorov-Smirnov one-sample (vs fitted normal) and two-sample tests
+# group: [stats_duck]
+
+require stats_duck
+
+# ─── ks_test_1samp ──────────────────────────────────────────────────────────
+
+# Sequential integers 1..20 — symmetric, near-normal sample. D and p match
+# R: ks.test(1:20, "pnorm", mean(1:20), sd(1:20)) → D=0.076564, p=0.99963.
+statement ok
+CREATE TABLE t1 AS SELECT unnest([1.0,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]) AS x;
+
+query TRRI
+SELECT (s).test_type, (s).d_statistic, (s).p_value, (s).n FROM (
+    SELECT ks_test_1samp(x) AS s FROM t1
+)
+----
+Kolmogorov-Smirnov (one-sample, fitted normal)	0.076564	0.999635	20
+
+# Highly skewed sample (exponential-ish): D is well above zero. The vanilla
+# KS p-value here is conservative (~0.31) because mu/sigma are estimated
+# from the sample — users who need a Lilliefors-corrected p should pair
+# with `shapiro_wilk` / `anderson_darling`.
+statement ok
+CREATE TABLE t2 AS SELECT unnest([0.1, 0.2, 0.3, 1.0, 2, 4, 8, 16, 32, 64]) AS x;
+
+query I
+SELECT (ks_test_1samp(x)).d_statistic > 0.25 FROM t2
+----
+true
+
+# Tiny sample — under the n>=3 floor → NULL.
+statement ok
+CREATE TABLE t_small AS SELECT unnest([1.0, 2]) AS x;
+
+query I
+SELECT ks_test_1samp(x) IS NULL FROM t_small
+----
+true
+
+# All-equal sample — zero variance, can't fit a normal → NULL.
+statement ok
+CREATE TABLE t_constant AS SELECT unnest([5.0, 5, 5, 5, 5]) AS x;
+
+query I
+SELECT ks_test_1samp(x) IS NULL FROM t_constant
+----
+true
+
+# NULLs in the input are dropped, not propagated.
+statement ok
+CREATE TABLE t_with_nulls AS SELECT unnest([1.0, 2, 3, NULL::DOUBLE, 4, 5, 6, 7, 8, 9, 10]) AS x;
+
+query I
+SELECT (ks_test_1samp(x)).n FROM t_with_nulls
+----
+10
+
+# ─── ks_test_2samp ──────────────────────────────────────────────────────────
+
+# Two shifted-but-overlapping samples. R asymptotic:
+#   ks.test(1:10, 3:12) → D=0.2, p≈0.9748.
+statement ok
+CREATE TABLE t_pair AS SELECT a, b FROM (VALUES
+    (1.0, 3.0), (2, 4), (3, 5), (4, 6), (5, 7),
+    (6, 8), (7, 9), (8, 10), (9, 11), (10, 12)
+) AS v(a, b);
+
+query TRRII
+SELECT (s).test_type, (s).d_statistic, (s).p_value, (s).n_x, (s).n_y FROM (
+    SELECT ks_test_2samp(a, b) AS s FROM t_pair
+)
+----
+Kolmogorov-Smirnov (two-sample)	0.200000	0.974789	10	10
+
+# Two clearly different samples (1..10 vs 50..59) — D = 1, p ≈ 0.
+query I
+SELECT (s).p_value < 0.001 FROM (
+    SELECT ks_test_2samp(a, b) AS s FROM (VALUES
+        (1.0, 50.0), (2, 51), (3, 52), (4, 53), (5, 54),
+        (6, 55), (7, 56), (8, 57), (9, 58), (10, 59)
+    ) AS v(a, b)
+)
+----
+true
+
+# Two-sample handles per-column NULLs independently: NULL in a doesn't drop
+# the b value from the same row.
+statement ok
+CREATE TABLE t_pair_nulls AS SELECT a, b FROM (VALUES
+    (1.0, 10.0), (NULL::DOUBLE, 11.0), (2.0, NULL::DOUBLE), (3.0, 12.0)
+) AS v(a, b);
+
+query II
+SELECT (s).n_x, (s).n_y FROM (
+    SELECT ks_test_2samp(a, b) AS s FROM t_pair_nulls
+)
+----
+3	3
+
+# Empty x sample → NULL (no two-sample test possible).
+statement ok
+CREATE TABLE t_one_side AS SELECT NULL::DOUBLE AS a, b FROM (VALUES (1.0),(2),(3)) AS v(b);
+
+query I
+SELECT ks_test_2samp(a, b) IS NULL FROM t_one_side
+----
+true
