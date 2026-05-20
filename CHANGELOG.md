@@ -12,6 +12,14 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- `poibin_cdf(probs LIST<DOUBLE>, k BIGINT) → DOUBLE` — Poisson Binomial CDF.
+  Returns `P(X ≤ k)` where `X = Σᵢ Bᵢ`, each `Bᵢ ∼ Bernoulli(pᵢ)` independent
+  with its own success probability. Computed by Hong (2013)'s direct
+  convolution: O(n²) time, O(n) memory, numerically stable for the n that
+  show up in biostat-scale queries. Reduces exactly to `pbinom(k, n, p)` when
+  all probabilities are equal. NULL handling: NULL in either argument or
+  inside the list → NULL; any `pᵢ` outside `[0, 1]` → NULL.
+
 - **Gamma / Beta / Exponential distribution functions.** d/p/q triples in the
   same R-style API as the existing `d/p/qnorm` / `d/p/qt` / `d/p/qchisq` /
   `d/p/qf` families. `dgamma(x, shape, [rate])` / `pgamma` / `qgamma` (rate

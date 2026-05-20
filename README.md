@@ -155,6 +155,7 @@ gives Q1=1.5 / Q3=3.5 (matching SAS PROC MEANS).
 | `dexp(x, [rate])`        | Exponential PDF (rate=1 default) |
 | `pexp(x, [rate])`        | Exponential CDF         |
 | `qexp(p, [rate])`        | Exponential quantile (closed form) |
+| `poibin_cdf(probs LIST<DOUBLE>, k BIGINT)` | Poisson Binomial CDF — `P(X ≤ k)` for `X = Σᵢ Bᵢ`, `Bᵢ ∼ Bernoulli(pᵢ)` |
 
 ### Table 1 summary (table function)
 

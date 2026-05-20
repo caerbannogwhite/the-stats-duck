@@ -1,0 +1,126 @@
+# name: test/sql/poibin_cdf.test
+# description: Poisson Binomial CDF via Hong (2013) direct convolution
+# group: [stats_duck]
+
+require stats_duck
+
+# ─── Headline case: matches R's poibin::ppoibin ─────────────────────────────
+
+# ppoibin(2, c(0.1, 0.2, 0.3, 0.4, 0.5)) = 0.85
+query R
+SELECT poibin_cdf([0.1, 0.2, 0.3, 0.4, 0.5]::DOUBLE[], 2)
+----
+0.85
+
+# Same series, k = 0: only the all-failure outcome contributes.
+# 0.9 · 0.8 · 0.7 · 0.6 · 0.5 = 0.1512
+query R
+SELECT poibin_cdf([0.1, 0.2, 0.3, 0.4, 0.5]::DOUBLE[], 0)
+----
+0.1512
+
+# Same series, k = 5 (= n): every outcome accounted for → exactly 1.
+query R
+SELECT poibin_cdf([0.1, 0.2, 0.3, 0.4, 0.5]::DOUBLE[], 5)
+----
+1
+
+# ─── Reduces to Binomial when all probabilities are equal ──────────────────
+
+# All p = 0.5, n = 5 → Binomial(5, 0.5). P(X ≤ 2) = (C(5,0)+C(5,1)+C(5,2))/32
+# = (1 + 5 + 10) / 32 = 16/32 = 0.5.
+query R
+SELECT poibin_cdf([0.5, 0.5, 0.5, 0.5, 0.5]::DOUBLE[], 2)
+----
+0.5
+
+# All p = 0.3, n = 4 → Binomial(4, 0.3). P(X ≤ 1) = 0.7⁴ + 4·0.3·0.7³ = 0.6517.
+query R
+SELECT poibin_cdf([0.3, 0.3, 0.3, 0.3]::DOUBLE[], 1)
+----
+0.6517
+
+# ─── Edge cases ─────────────────────────────────────────────────────────────
+
+# Empty probability list → X is deterministically 0 → P(X ≤ k) = 1 for k ≥ 0.
+query R
+SELECT poibin_cdf([]::DOUBLE[], 0)
+----
+1
+
+# k < 0 → CDF below the support is always 0.
+query R
+SELECT poibin_cdf([0.5]::DOUBLE[], -1)
+----
+0
+
+# k ≥ n → CDF above the support is always 1.
+query R
+SELECT poibin_cdf([0.5, 0.5]::DOUBLE[], 100)
+----
+1
+
+# All p = 1 → X = n deterministically, so P(X ≤ k) = 0 for k < n and 1 for k ≥ n.
+query RRR
+SELECT
+    poibin_cdf([1.0, 1.0, 1.0]::DOUBLE[], 2),
+    poibin_cdf([1.0, 1.0, 1.0]::DOUBLE[], 3),
+    poibin_cdf([1.0, 1.0, 1.0]::DOUBLE[], 4)
+----
+0	1	1
+
+# All p = 0 → X = 0 deterministically → P(X ≤ k) = 1 for k ≥ 0.
+query R
+SELECT poibin_cdf([0.0, 0.0, 0.0]::DOUBLE[], 0)
+----
+1
+
+# ─── Validity / NULL handling ───────────────────────────────────────────────
+
+# Probability outside [0, 1] → NULL (one bad entry invalidates the sum).
+query R
+SELECT poibin_cdf([0.3, 1.5]::DOUBLE[], 1)
+----
+NULL
+
+query R
+SELECT poibin_cdf([-0.1, 0.5]::DOUBLE[], 1)
+----
+NULL
+
+# NULL inside the list → NULL output.
+query R
+SELECT poibin_cdf([0.3, NULL]::DOUBLE[], 1)
+----
+NULL
+
+# NULL list → NULL.
+query R
+SELECT poibin_cdf(NULL::DOUBLE[], 1)
+----
+NULL
+
+# NULL k → NULL.
+query R
+SELECT poibin_cdf([0.3, 0.4]::DOUBLE[], NULL)
+----
+NULL
+
+# ─── Per-row evaluation (scalar over a table) ───────────────────────────────
+
+statement ok
+CREATE TABLE trial_groups AS SELECT * FROM (VALUES
+    ([0.1, 0.2, 0.3]::DOUBLE[], 1),
+    ([0.5, 0.5, 0.5, 0.5]::DOUBLE[], 2),
+    ([0.9, 0.9]::DOUBLE[], 0)
+) AS t(probs, threshold);
+
+# Group 1: ppoibin(1, c(0.1, 0.2, 0.3)) = 0.902
+# Group 2: pbinom(2, 4, 0.5) = 11/16 = 0.6875
+# Group 3: 0.1 · 0.1 = 0.01 (all-failure probability)
+query R
+SELECT poibin_cdf(probs, threshold) FROM trial_groups ORDER BY threshold
+----
+0.01
+0.902
+0.6875
