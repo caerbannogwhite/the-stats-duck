@@ -45,7 +45,21 @@ struct TableOneRow {
 	// can pick it up with FIRST(p_value). NULL when `by` is unset / single
 	// stratum or when the underlying test fails (e.g. zero variance, too few
 	// samples).
-	double p_value = std::nan("");
+	double p_value;
+
+	// Explicit constructor so 5-arg brace-init calls (the existing pattern in
+	// EmitNumericRows / EmitCategoricalRows) keep working with p_value
+	// defaulted to NaN. A C++17 NSDMI default would also work under MSVC, but
+	// emscripten's libc++ rejects brace-init of an aggregate with NSDMIs
+	// when the brace list is shorter than the field count — the constructor
+	// form is portable across both toolchains.
+	TableOneRow(std::string variable, std::string level, std::string statistic,
+	            std::string stratum, std::string display,
+	            double p_value = std::nan(""))
+	    : variable(std::move(variable)), level(std::move(level)),
+	      statistic(std::move(statistic)), stratum(std::move(stratum)),
+	      display(std::move(display)), p_value(p_value) {
+	}
 };
 
 struct TableOneBindData : public TableFunctionData {
