@@ -1,0 +1,178 @@
+# name: test/sql/auto_bin.test
+# description: bin_edges aggregate (Sturges / FD / Scott / sqrt / Rice / auto) + bin_label scalar
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE seq20 AS SELECT unnest([1.0,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]) AS x;
+
+# ─── Bin-count rules ────────────────────────────────────────────────────────
+
+# Sturges: k = ceil(log2(20) + 1) = ceil(5.32) = 6 → 7 edges over [1, 20].
+query I
+SELECT len(bin_edges(x)) FROM seq20
+----
+7
+
+# Freedman-Diaconis: width = 2·IQR·n^(-1/3) ≈ 2·9.5·0.368 ≈ 7.0 → k=3, 4 edges.
+query I
+SELECT len(bin_edges(x, 'fd')) FROM seq20
+----
+4
+
+# Scott: width = 3.5·sd·n^(-1/3). sd(1..20) ≈ 5.92 → width ≈ 7.62 → k=3, 4 edges.
+query I
+SELECT len(bin_edges(x, 'scott')) FROM seq20
+----
+4
+
+# Square-root rule: k = ceil(sqrt(20)) = 5 → 6 edges.
+query I
+SELECT len(bin_edges(x, 'sqrt')) FROM seq20
+----
+6
+
+# Rice rule: k = ceil(2 · 20^(1/3)) = ceil(5.43) = 6 → 7 edges.
+query I
+SELECT len(bin_edges(x, 'rice')) FROM seq20
+----
+7
+
+# Auto = max(sturges, fd) = max(6, 3) = 6 → 7 edges.
+query I
+SELECT len(bin_edges(x, 'auto')) FROM seq20
+----
+7
+
+# Method is case-insensitive.
+query I
+SELECT len(bin_edges(x, 'STURGES')) FROM seq20
+----
+7
+
+# Edge vector spans [min(x), max(x)] exactly.
+query RR
+SELECT (bin_edges(x))[1], (bin_edges(x))[len(bin_edges(x))] FROM seq20
+----
+1	20
+
+# ─── bin_label ──────────────────────────────────────────────────────────────
+
+# Round-trip: every value lands in one of the bins; the maximum lands in the
+# last (closed) bin; bin assignments partition the data.
+query TI
+WITH e AS (SELECT bin_edges(x, 'sqrt') AS edges FROM seq20)
+SELECT bin_label(x, edges), count(*) FROM seq20, e GROUP BY 1 ORDER BY 1
+----
+[1, 4.8)	4
+[12.4, 16.2)	4
+[16.2, 20]	4
+[4.8, 8.6)	4
+[8.6, 12.4)	4
+
+# Last bin is closed on the right — the maximum value gets a label, not NULL.
+query T
+WITH e AS (SELECT bin_edges(x, 'sqrt') AS edges FROM seq20)
+SELECT bin_label(20.0, edges) FROM e
+----
+[16.2, 20]
+
+# Intermediate bin is half-open `[lo, hi)`.
+query T
+WITH e AS (SELECT bin_edges(x, 'sqrt') AS edges FROM seq20)
+SELECT bin_label(4.8, edges) FROM e
+----
+[4.8, 8.6)
+
+# Value below min → NULL.
+query T
+WITH e AS (SELECT bin_edges(x, 'sqrt') AS edges FROM seq20)
+SELECT bin_label(0.5, edges) FROM e
+----
+NULL
+
+# Value above max → NULL.
+query T
+WITH e AS (SELECT bin_edges(x, 'sqrt') AS edges FROM seq20)
+SELECT bin_label(25.0, edges) FROM e
+----
+NULL
+
+# NULL x → NULL.
+query T
+WITH e AS (SELECT bin_edges(x, 'sqrt') AS edges FROM seq20)
+SELECT bin_label(NULL::DOUBLE, edges) FROM e
+----
+NULL
+
+# NULL edges → NULL.
+query T
+SELECT bin_label(5.0, NULL::DOUBLE[])
+----
+NULL
+
+# ─── Degenerate / edge inputs ───────────────────────────────────────────────
+
+# n < 2 → NULL (can't form a meaningful range).
+query I
+SELECT bin_edges(x) IS NULL FROM (SELECT unnest([5.0]) AS x)
+----
+true
+
+# All-NULL group → NULL.
+query I
+SELECT bin_edges(x) IS NULL FROM (SELECT NULL::DOUBLE AS x)
+----
+true
+
+# All values equal → degenerate edge list with a single point. bin_label
+# still returns the trivial label so downstream code doesn't crash.
+query T
+WITH e AS (SELECT bin_edges(x) AS edges FROM (SELECT unnest([3.0, 3, 3, 3, 3]) AS x))
+SELECT bin_label(3.0, edges) FROM e
+----
+[3, 3]
+
+# Unknown method → bind error.
+statement error
+SELECT bin_edges(x, 'sturg') FROM seq20
+----
+unknown method 'sturg'
+
+# Non-constant method → bind error.
+statement error
+SELECT bin_edges(x, m) FROM (SELECT x, 'sturges' AS m FROM seq20)
+----
+'method' must be a constant string
+
+# NULL method → bind error.
+statement error
+SELECT bin_edges(x, NULL::VARCHAR) FROM seq20
+----
+'method' must not be NULL
+
+# ─── Integration with table_one ─────────────────────────────────────────────
+
+# Materialize a binned column and feed it to table_one. The bin label is a
+# VARCHAR, so table_one will treat it as categorical without needing
+# force_categorical.
+statement ok
+CREATE TABLE patients AS SELECT * FROM (VALUES
+    (25.0, 'F'), (32, 'F'), (45, 'M'), (51, 'M'), (38, 'F'),
+    (62, 'M'), (29, 'F'), (47, 'M'), (55, 'F'), (41, 'M')
+) AS t(age, sex);
+
+statement ok
+CREATE TABLE patients_binned AS
+WITH e AS (SELECT bin_edges(age, 'sqrt') AS edges FROM patients)
+SELECT *, bin_label(age, edges) AS age_bin FROM patients, e;
+
+# Sturges/sqrt on n=10 → k=ceil(sqrt(10))=4 distinct bins. Spot-check that
+# table_one sees them as categorical and the counts add up to 10.
+query I
+SELECT sum(CAST(regexp_extract(display, '^([0-9]+)') AS INT))
+FROM table_one('patients_binned', variables := ['age_bin'])
+WHERE statistic = 'n (%)'
+----
+10

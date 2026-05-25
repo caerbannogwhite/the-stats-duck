@@ -12,6 +12,27 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- **`bin_edges` / `bin_label` — auto-binning helpers.**
+  `bin_edges(x [, method]) → LIST<DOUBLE>` is a buffer-based aggregate that
+  returns the edge vector for the chosen rule: `'sturges'` (default,
+  `k = ⌈log₂(n)+1⌉`, R's `hist()` default), `'fd'` (Freedman-Diaconis), `'scott'`
+  (normal-reference), `'sqrt'`, `'rice'`, or `'auto'` (numpy's `max(sturges, fd)`).
+  Methods that depend on robust scale (FD, Scott) silently fall back to
+  Sturges when IQR/sd is zero. `bin_label(x, edges) → VARCHAR` formats the
+  bin containing `x` as `'[lo, hi)'` (or `'[lo, hi]'` for the rightmost bin so
+  the maximum is never dropped). Pairs naturally with `table_one` — bin a
+  numeric column up front, then summarise the binned column categorically.
+
+- **Local DuckDB submodule patch (`duckdb/third_party/fmt/include/fmt/format.h`).**
+  Upstream fmt checks `#ifdef _SECURE_SCL` to decide whether to use
+  `stdext::checked_array_iterator`, but Microsoft's CRT auto-defines
+  `_SECURE_SCL=0` in Release builds — and the v145 MSVC toolset (VS2026)
+  removed `stdext::checked_array_iterator` entirely, so the `#ifdef` branch
+  now fails to compile. Patched to `#if defined(_SECURE_SCL) && _SECURE_SCL > 0`,
+  which correctly takes the plain-pointer branch in Release. The patch is
+  localized and a candidate for upstream contribution; re-apply if the
+  DuckDB submodule moves.
+
 - `poibin_cdf(probs LIST<DOUBLE>, k BIGINT) → DOUBLE` — Poisson Binomial CDF.
   Returns `P(X ≤ k)` where `X = Σᵢ Bᵢ`, each `Bᵢ ∼ Bernoulli(pᵢ)` independent
   with its own success probability. Computed by Hong (2013)'s direct

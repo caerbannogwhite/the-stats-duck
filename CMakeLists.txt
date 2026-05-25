@@ -73,6 +73,7 @@ set(EXTENSION_SOURCES
     src/sign_test_function.cpp
     src/adjust_p_function.cpp
     src/poibin_function.cpp
+    src/auto_bin_function.cpp
     src/table_one_function.cpp
     src/normality_function.cpp
     src/ks_test_function.cpp

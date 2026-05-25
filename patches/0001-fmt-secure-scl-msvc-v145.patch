@@ -1,0 +1,19 @@
+diff --git a/third_party/fmt/include/fmt/format.h b/third_party/fmt/include/fmt/format.h
+index 4c51630104..d431ca18fb 100644
+--- a/third_party/fmt/include/fmt/format.h
++++ b/third_party/fmt/include/fmt/format.h
+@@ -321,7 +321,13 @@ inline typename Container::value_type* get_data(Container& c) {
+   return c.data();
+ }
+ 
+-#ifdef _SECURE_SCL
++// Local patch: MSVC v145 toolset (VS2026) removed `stdext::checked_array_iterator`.
++// Upstream fmt checks `#ifdef _SECURE_SCL`, but Microsoft's CRT auto-defines
++// `_SECURE_SCL` to 0 in Release builds (defined-but-zero), so the original
++// `#ifdef` branch hit the removed symbol. Check the value instead — Release
++// builds (_SECURE_SCL=0) now correctly take the plain-pointer branch. DuckDB
++// submodule modification: re-apply if the submodule moves; upstream candidate.
++#if defined(_SECURE_SCL) && _SECURE_SCL > 0
+ // Make a checked iterator to avoid MSVC warnings.
+ template <typename T> using checked_ptr = stdext::checked_array_iterator<T*>;
+ template <typename T> checked_ptr<T> make_checked(T* p, std::size_t size) {
