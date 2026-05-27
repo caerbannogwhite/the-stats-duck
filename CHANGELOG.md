@@ -12,6 +12,18 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- **`corr_matrix(data, variables [, method])` table function** — long-format
+  pairwise correlation matrix as `(row_var, col_var, coef, p_value, n)` rows.
+  `method` is `'pearson'` (default), `'spearman'`, or `'kendall'`; the `coef`
+  column carries the method-appropriate coefficient (r / rho / tau) under one
+  uniform name so downstream pipelines compose without method-specific casing.
+  All n² rows emitted (full symmetric matrix including diagonal and mirror
+  pairs) so the result drops straight into a `DRAW heatmap` without a
+  CROSS JOIN. Upper triangle is computed once in C++ and mirrored — for k
+  variables that's k·(k+1)/2 aggregate runs instead of k². Pairwise-complete
+  NULL handling per the underlying `pearson_test` / `spearman_test` /
+  `kendall_test` aggregates. Non-numeric columns are rejected at bind time.
+
 - **ggsql: `WITH … VISUALIZE`** — a leading CTE clause is now accepted in
   front of a `VISUALIZE` statement. The captured `WITH [RECURSIVE] <cte> AS
   (...) [, <cte> AS (...)]*` block is prepended to each layer's projected

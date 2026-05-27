@@ -12,6 +12,7 @@
 #include "adjust_p_function.hpp"
 #include "poibin_function.hpp"
 #include "auto_bin_function.hpp"
+#include "corr_matrix_function.hpp"
 #include "table_one_function.hpp"
 #include "normality_function.hpp"
 #include "ks_test_function.hpp"
@@ -60,6 +61,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// Auto-binning helpers
 	RegisterBinEdges(loader);
 	RegisterBinLabel(loader);
+
+	// Pairwise correlation matrix
+	RegisterCorrMatrix(loader);
 
 	// Table 1 helper
 	RegisterTableOne(loader);

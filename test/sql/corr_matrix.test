@@ -1,0 +1,186 @@
+# name: test/sql/corr_matrix.test
+# description: corr_matrix table function — long-format pairwise correlation matrix
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS SELECT * FROM (VALUES
+    (39.1, 18.7, 181.0, 3750.0),
+    (39.5, 17.4, 186,   3800),
+    (40.3, 18.0, 195,   3250),
+    (46.5, 17.9, 192,   3500),
+    (50.0, 15.9, 224,   5350),
+    (49.2, 18.2, 221,   6300)
+) AS t(bill_len, bill_dep, flipper, mass);
+
+# ─── Output schema and self-pairs ───────────────────────────────────────────
+
+# n² rows for k variables (4×4 = 16 here).
+query I
+SELECT count(*) FROM corr_matrix('penguins', variables := ['bill_len','bill_dep','flipper','mass'])
+----
+16
+
+# Diagonal entries: coef = 1 (within fp tolerance), n equals the row count.
+query TI
+SELECT row_var, n FROM corr_matrix('penguins',
+    variables := ['bill_len','bill_dep','flipper','mass'])
+WHERE row_var = col_var ORDER BY row_var
+----
+bill_dep	6
+bill_len	6
+flipper	6
+mass	6
+
+# All diagonal coefficients are 1.
+query R
+SELECT max(abs(coef - 1.0)) FROM corr_matrix('penguins',
+    variables := ['bill_len','bill_dep','flipper','mass'])
+WHERE row_var = col_var
+----
+0
+
+# ─── Symmetry (Pearson) ─────────────────────────────────────────────────────
+
+# Mirror entries match exactly (computed once, mirrored in C++).
+query R
+SELECT max(abs(a.coef - b.coef)) FROM
+    corr_matrix('penguins', variables := ['bill_len','bill_dep','flipper','mass']) a
+    JOIN corr_matrix('penguins', variables := ['bill_len','bill_dep','flipper','mass']) b
+      ON a.row_var = b.col_var AND a.col_var = b.row_var
+----
+0
+
+# Spot-check vs R: cor(bill_len, flipper) ≈ 0.887 for this 6-row fixture.
+query R
+SELECT round(coef, 3) FROM corr_matrix('penguins',
+    variables := ['bill_len','flipper'])
+WHERE row_var = 'bill_len' AND col_var = 'flipper'
+----
+0.887
+
+# Negative correlation: bill_len vs bill_dep ≈ -0.505.
+query R
+SELECT round(coef, 3) FROM corr_matrix('penguins',
+    variables := ['bill_len','bill_dep'])
+WHERE row_var = 'bill_len' AND col_var = 'bill_dep'
+----
+-0.505
+
+# ─── Methods ────────────────────────────────────────────────────────────────
+
+# Spearman rho on the same 2-column pair (different value than Pearson r).
+query R
+SELECT round(coef, 3) FROM corr_matrix('penguins',
+    variables := ['bill_len','flipper'], method := 'spearman')
+WHERE row_var = 'bill_len' AND col_var = 'flipper'
+----
+0.943
+
+# Kendall tau.
+query R
+SELECT round(coef, 3) FROM corr_matrix('penguins',
+    variables := ['bill_len','flipper'], method := 'kendall')
+WHERE row_var = 'bill_len' AND col_var = 'flipper'
+----
+0.867
+
+# Method is case-insensitive.
+query I
+SELECT count(*) FROM corr_matrix('penguins',
+    variables := ['bill_len','flipper'], method := 'PEARSON')
+----
+4
+
+# ─── Pairwise-complete handling ─────────────────────────────────────────────
+
+# NULLs in a column are excluded from that pair's n; other pairs unaffected.
+statement ok
+CREATE TABLE p_with_nulls AS SELECT * FROM (VALUES
+    (1.0,    2.0, 3.0),
+    (2,      4,   NULL),
+    (3,      NULL,7),
+    (4,      8,   9),
+    (5,     10,   11)
+) AS t(a, b, c);
+
+# (a, b): 4 non-null pairs (rows 1, 2, 4, 5).
+query I
+SELECT n FROM corr_matrix('p_with_nulls', variables := ['a','b','c'])
+WHERE row_var = 'a' AND col_var = 'b'
+----
+4
+
+# (a, c): 4 non-null pairs (rows 1, 3, 4, 5).
+query I
+SELECT n FROM corr_matrix('p_with_nulls', variables := ['a','b','c'])
+WHERE row_var = 'a' AND col_var = 'c'
+----
+4
+
+# (b, c): 3 non-null pairs (rows 1, 4, 5).
+query I
+SELECT n FROM corr_matrix('p_with_nulls', variables := ['a','b','c'])
+WHERE row_var = 'b' AND col_var = 'c'
+----
+3
+
+# ─── Composition with WITH … VISUALIZE → heatmap ────────────────────────────
+
+# The canonical correlation-heatmap pipeline: feed the corr_matrix output
+# straight into a VISUALIZE block via the v0.5 WITH support. We only verify
+# the spec compiles and the layer SQL references corr_matrix correctly.
+# Single line so the paren-preserved whitespace doesn't end up in the fixture.
+query TT
+WITH c AS (SELECT * FROM corr_matrix('penguins', variables := ['bill_len','bill_dep','flipper','mass'])) VISUALIZE row_var AS x, col_var AS y, coef AS color FROM c DRAW heatmap SCALE color TO redblue SCALE color DOMAIN -1 1
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"rect","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"ordinal"},"color":{"field":"color","type":"quantitative","scale":{"scheme":"redblue","domain":[-1,1]}}}}	{layer_0='WITH c AS (SELECT * FROM corr_matrix(\'penguins\', variables := [\'bill_len\',\'bill_dep\',\'flipper\',\'mass\'])) SELECT row_var AS x, col_var AS y, coef AS color FROM c'}
+
+# ─── Error cases ────────────────────────────────────────────────────────────
+
+# Need at least 2 variables for a "matrix".
+statement error
+SELECT * FROM corr_matrix('penguins', variables := ['bill_len'])
+----
+must contain at least 2 columns
+
+# Empty variables list.
+statement error
+SELECT * FROM corr_matrix('penguins', variables := [])
+----
+must contain at least 2 columns
+
+# NULL inside variables list.
+statement error
+SELECT * FROM corr_matrix('penguins', variables := ['bill_len', NULL])
+----
+'variables' list entries must not be NULL
+
+# Missing column.
+statement error
+SELECT * FROM corr_matrix('penguins', variables := ['bill_len', 'bogus'])
+----
+column 'bogus' not found
+
+# Non-numeric column.
+statement ok
+CREATE TABLE mixed AS SELECT * FROM (VALUES (1.0, 'a'), (2.0, 'b')) AS t(num, cat);
+
+statement error
+SELECT * FROM corr_matrix('mixed', variables := ['num', 'cat'])
+----
+not numeric
+
+# Unknown method.
+statement error
+SELECT * FROM corr_matrix('penguins', variables := ['bill_len','flipper'],
+    method := 'rankit')
+----
+unknown method 'rankit'
+
+# Missing table.
+statement error
+SELECT * FROM corr_matrix('does_not_exist', variables := ['a','b'])
+----
+Table

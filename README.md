@@ -164,6 +164,7 @@ gives Q1=1.5 / Q3=3.5 (matching SAS PROC MEANS).
 | Function                                          | Description                                                |
 | ------------------------------------------------- | ---------------------------------------------------------- |
 | `table_one(data, variables [, by])`               | Long-format descriptives table for mixed variable types    |
+| `corr_matrix(data, variables [, method])`         | Long-format pairwise correlation matrix (`pearson` / `spearman` / `kendall`) |
 
 ```sql
 SELECT * FROM table_one(
