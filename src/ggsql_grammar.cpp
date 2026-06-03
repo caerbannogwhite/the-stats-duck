@@ -330,36 +330,72 @@ ParseResult ParseGgsql(const string &query) {
 		return result;
 	}
 
-	// Optional `FACET BY <expr>`. Stored as a synthetic aesthetic named "facet";
-	// "facet" is reserved — Compile() detects it to wrap the spec in a Vega-Lite
-	// facet operator and BuildProjectedSql carries it through.
+	// Optional `FACET BY <row_expr> [, <col_expr>] [ROWS|COLS]`. The 1D form
+	// stores a synthetic aesthetic named "facet" and an optional facet_layout
+	// ("rows" / "cols" / "" grid). The 2D form (two comma-separated expressions)
+	// stores both `facet` (row) and `facet2` (column) and produces a row × column
+	// grid; ROWS/COLS is rejected in the 2D form since the layout is fixed.
+	// Compile() detects these aesthetics to wrap the spec in a Vega-Lite facet
+	// operator and BuildProjectedSql carries them through as projected columns.
 	if (!at_end() && IEqual(peek(), "FACET")) {
 		i++; // consume FACET (case-insensitive — already verified)
 		if (!consume("BY")) {
 			return result;
 		}
-		if (at_end() || IEqual(peek(), "SCALE") || IEqual(peek(), "ROWS") ||
-		    IEqual(peek(), "COLS") || IEqual(peek(), "TITLE") || IEqual(peek(), "SUBTITLE")) {
+		auto is_facet_terminator = [&]() {
+			return at_end() || IEqual(peek(), "SCALE") || IEqual(peek(), "ROWS") ||
+			       IEqual(peek(), "COLS") || IEqual(peek(), "TITLE") || IEqual(peek(), "SUBTITLE");
+		};
+		if (is_facet_terminator() || peek() == ",") {
 			result.error = "Expected expression after 'FACET BY'";
 			return result;
 		}
-		string expr;
-		while (!at_end() && !IEqual(peek(), "SCALE") && !IEqual(peek(), "ROWS") &&
-		       !IEqual(peek(), "COLS") && !IEqual(peek(), "TITLE") &&
-		       !IEqual(peek(), "SUBTITLE")) {
-			if (!expr.empty()) {
-				expr += " ";
+		string row_expr;
+		while (!is_facet_terminator() && peek() != ",") {
+			if (!row_expr.empty()) {
+				row_expr += " ";
 			}
-			expr += tokens[i++];
+			row_expr += tokens[i++];
 		}
 		AestheticMapping facet;
-		facet.expression = std::move(expr);
+		facet.expression = std::move(row_expr);
 		facet.aesthetic = "facet";
 		result.stmt.aesthetics.push_back(std::move(facet));
 
-		// Optional layout: ROWS (vertical stack), COLS (horizontal stack), or
-		// nothing (grid — Vega-Lite default).
+		bool two_dim = false;
+		if (!at_end() && peek() == ",") {
+			i++; // consume ","
+			if (is_facet_terminator() || peek() == ",") {
+				result.error = "Expected column expression after 'FACET BY <row>,'";
+				return result;
+			}
+			string col_expr;
+			while (!is_facet_terminator() && peek() != ",") {
+				if (!col_expr.empty()) {
+					col_expr += " ";
+				}
+				col_expr += tokens[i++];
+			}
+			if (!at_end() && peek() == ",") {
+				result.error = "FACET BY accepts at most two expressions (row, column)";
+				return result;
+			}
+			AestheticMapping facet2;
+			facet2.expression = std::move(col_expr);
+			facet2.aesthetic = "facet2";
+			result.stmt.aesthetics.push_back(std::move(facet2));
+			two_dim = true;
+		}
+
+		// Optional layout for 1D facet: ROWS (vertical), COLS (horizontal), or
+		// nothing (grid — Vega-Lite default). The 2D form has a fixed row ×
+		// column layout, so ROWS/COLS would be redundant or contradictory.
 		if (!at_end() && (IEqual(peek(), "ROWS") || IEqual(peek(), "COLS"))) {
+			if (two_dim) {
+				result.error =
+				    "FACET BY <row>, <col> does not accept ROWS/COLS (always row × column)";
+				return result;
+			}
 			result.stmt.facet_layout = StringUtil::Lower(tokens[i]);
 			i++;
 		}

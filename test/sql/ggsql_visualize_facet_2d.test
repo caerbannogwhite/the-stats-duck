@@ -1,0 +1,83 @@
+# name: test/sql/ggsql_visualize_facet_2d.test
+# description: ggsql `FACET BY <row>, <col>` — 2D row × column grid
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE penguins AS SELECT * FROM (VALUES
+    (39.1, 18.7, 'Adelie',  'female'),
+    (39.5, 17.4, 'Adelie',  'male'),
+    (44.0, 18.0, 'Gentoo',  'female'),
+    (45.2, 17.9, 'Gentoo',  'male'),
+    (48.1, 16.3, 'Chinstrap','female'),
+    (49.3, 15.7, 'Chinstrap','male')
+) AS t(bill_len, bill_dep, species, sex);
+
+# Single-layer 2D facet: facet operator carries both row and column sub-channels.
+# The projected SQL exposes both `facet` and `facet2` as columns.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species, sex
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"row":{"field":"facet","type":"nominal"},"column":{"field":"facet2","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet, sex AS facet2 FROM penguins'}
+
+# Bar mark in 2D facet — GROUP BY extends to (x, facet, facet2).
+query TT
+VISUALIZE species AS x, bill_dep AS y FROM penguins DRAW bar FACET BY species, sex
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"row":{"field":"facet","type":"nominal"},"column":{"field":"facet2","type":"nominal"}},"spec":{"mark":"bar","encoding":{"x":{"field":"x","type":"ordinal"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT x, facet, facet2, SUM(y) AS y FROM (SELECT species AS x, bill_dep AS y, species AS facet, sex AS facet2 FROM penguins) GROUP BY x, facet, facet2 ORDER BY x'}
+
+# Multi-layer 2D facet: layer:[...] sits inside the facet's `spec`.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW line FACET BY species, sex
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","facet":{"row":{"field":"facet","type":"nominal"},"column":{"field":"facet2","type":"nominal"}},"spec":{"layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}]}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet, sex AS facet2 FROM penguins', layer_1='SELECT * FROM (SELECT bill_len AS x, bill_dep AS y, species AS facet, sex AS facet2 FROM penguins) ORDER BY x'}
+
+# 2D facet composes with SCALE on a regular channel.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y, species AS color FROM penguins DRAW point FACET BY species, sex SCALE color TO viridis
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"row":{"field":"facet","type":"nominal"},"column":{"field":"facet2","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal","scale":{"scheme":"viridis"}}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS color, species AS facet, sex AS facet2 FROM penguins'}
+
+# 2D facet composes with TITLE.
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species, sex TITLE 'Bill morphology'
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"row":{"field":"facet","type":"nominal"},"column":{"field":"facet2","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},"title":{"text":"Bill morphology"}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, species AS facet, sex AS facet2 FROM penguins'}
+
+# Paren-wrapped expressions are valid (tokenizer preserves them).
+query TT
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY coalesce(species, 'NA'), sex
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"row":{"field":"facet","type":"nominal"},"column":{"field":"facet2","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT bill_len AS x, bill_dep AS y, coalesce(species, \'NA\') AS facet, sex AS facet2 FROM penguins'}
+
+# ── Error cases ─────────────────────────────────────────────────────────────
+
+# Missing column expression after the comma.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species,
+----
+Expected column expression after 'FACET BY <row>,'
+
+# Three expressions — over the row × column limit.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species, sex, bill_dep
+----
+FACET BY accepts at most two expressions (row, column)
+
+# ROWS/COLS modifier is rejected in the 2D form (layout is fixed).
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species, sex ROWS
+----
+FACET BY <row>, <col> does not accept ROWS/COLS
+
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY species, sex COLS
+----
+FACET BY <row>, <col> does not accept ROWS/COLS
+
+# Leading comma — no row expression.
+statement error
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point FACET BY , sex
+----
+Expected expression after 'FACET BY'

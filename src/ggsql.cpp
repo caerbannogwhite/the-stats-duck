@@ -77,6 +77,15 @@ bool HasFacet(const VisualizeStatement &stmt) {
 	return false;
 }
 
+bool Has2DFacet(const VisualizeStatement &stmt) {
+	for (const auto &a : stmt.aesthetics) {
+		if (StringUtil::CIEquals(a.aesthetic, "facet2")) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // Inject channel sub-objects (e.g. `,"scale":{...}` for TO/ZERO/DOMAIN,
 // `,"axis":{...}` for LABEL) into each encoding channel that has at least one
 // matching ScaleSpec. Relies on the current encoding format using only
@@ -175,8 +184,14 @@ CompiledResult Compile(ClientContext &context, const VisualizeStatement &stmt) {
 	}
 	string projected_sql = BuildProjectedSql(stmt);
 	bool faceted = HasFacet(stmt);
+	bool faceted_2d = Has2DFacet(stmt);
 	string facet_block;
-	if (faceted) {
+	if (faceted_2d) {
+		// 2D grid: row × column. Vega-Lite's facet operator with both `row` and
+		// `column` sub-channels.
+		facet_block = "\"facet\":{\"row\":{\"field\":\"facet\",\"type\":\"nominal\"},"
+		              "\"column\":{\"field\":\"facet2\",\"type\":\"nominal\"}},\"spec\":";
+	} else if (faceted) {
 		if (stmt.facet_layout == "rows") {
 			facet_block = "\"facet\":{\"row\":{\"field\":\"facet\",\"type\":\"nominal\"}},\"spec\":";
 		} else if (stmt.facet_layout == "cols") {

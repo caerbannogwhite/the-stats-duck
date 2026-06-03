@@ -133,10 +133,16 @@ MarkResult RenderLine(const MarkContext &ctx) {
 }
 
 MarkResult RenderBar(const MarkContext &ctx) {
-	// When faceting is active, the `facet` column rides through projected_sql
+	// When faceting is active, the facet column(s) ride through projected_sql
 	// and must be carried through bar's GROUP BY so each facet partition keeps
-	// its own ordinal x bins.
-	string group_by = HasAesthetic(ctx, "facet") ? string("x, facet") : string("x");
+	// its own ordinal x bins. 2D facet adds a second `facet2` column.
+	string group_by = "x";
+	if (HasAesthetic(ctx, "facet")) {
+		group_by += ", facet";
+	}
+	if (HasAesthetic(ctx, "facet2")) {
+		group_by += ", facet2";
+	}
 	MarkResult r;
 	r.layer_body =
 	    "\"mark\":\"bar\",\"encoding\":" + BuildEncoding(ctx, kStandardChannels, {{"x", "ordinal"}});

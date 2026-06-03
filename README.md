@@ -261,7 +261,7 @@ runs each layer's SQL and feeds the rows to vega-embed via the `datasets` API.
 VISUALIZE <expr> AS <aesthetic> [: <type>] (, <expr> AS <aesthetic> ...)
 FROM <table>
 DRAW <mark> (DRAW <mark>)*
-[FACET BY <expr> [ROWS | COLS]]
+[FACET BY <expr> [ROWS | COLS] | FACET BY <row_expr>, <col_expr>]
 [SCALE <channel> {TO <scheme> | ZERO true|false | DOMAIN <lo> <hi> | LABEL '<text>'}]*
 [TITLE '<text>' [SUBTITLE '<text>']]
 ```
@@ -508,6 +508,13 @@ VISUALIZE bill_len AS x, bill_dep AS y FROM penguins DRAW point DRAW line;
 ```sql
 VISUALIZE bill_len AS x, bill_dep AS y FROM penguins
 DRAW point FACET BY species ROWS;
+```
+
+#### 2D facet grid — species rows × sex columns
+
+```sql
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins
+DRAW point FACET BY species, sex;
 ```
 
 #### SQL expressions in mappings

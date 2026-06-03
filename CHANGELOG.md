@@ -12,6 +12,15 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- ggsql: 2D `FACET BY <row_expr>, <col_expr>` — two comma-separated
+  expressions produce a row × column grid via vega-lite's facet operator
+  with both `row` and `column` sub-channels. Composes with `SCALE`,
+  `TITLE`, multi-layer `DRAW`, and `WITH … VISUALIZE`. The 1D form
+  (`FACET BY <expr>` with optional `ROWS` / `COLS` layout) is unchanged.
+  `ROWS` / `COLS` is rejected in the 2D form since the layout is fixed.
+  The bar mark's GROUP BY extends to both facet columns so per-cell
+  ordinal bins compute correctly.
+
 - ggsql: `violin` mark — per-category density rendered as horizontal
   Vega-Lite area marks via the canonical `density` transform + `column`
   facet idiom. Required aesthetics `x` (categorical) and `y` (numeric);
