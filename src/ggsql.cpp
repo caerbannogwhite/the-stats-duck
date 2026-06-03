@@ -56,6 +56,50 @@ struct CompiledResult {
 	vector<pair<string, string>> layer_sqls;
 };
 
+// Apply the layer's STAT modifier to a freshly-rendered MarkResult.
+//   identity / "" : no-op
+//   smooth        : prepend a Vega-Lite loess transform on (x, y), grouped by
+//                   color if mapped. Rejected if the mark already emitted its
+//                   own `"transform":` block (regression / density / violin /
+//                   histogram), since two transform keys would be ambiguous.
+//   summary       : rewrite data_sql to `SELECT x [, color, facet, facet2],
+//                   AVG(y) AS y FROM (projected) GROUP BY ... ORDER BY x`.
+void ApplyStat(MarkResult &rendered, const VisualizeStatement &stmt, const DrawLayer &layer,
+               const string &projected_sql) {
+	if (layer.stat.empty() || layer.stat == "identity") {
+		return;
+	}
+	if (layer.stat == "smooth") {
+		if (rendered.layer_body.compare(0, 12, "\"transform\":") == 0) {
+			throw InvalidInputException(
+			    "ggsql: STAT smooth is not allowed on '%s' (mark already emits a transform)",
+			    layer.mark);
+		}
+		string loess = "\"transform\":[{\"loess\":\"y\",\"on\":\"x\"";
+		if (HasAesthetic(stmt, "color")) {
+			loess += ",\"groupby\":[\"color\"]";
+		}
+		loess += "}],";
+		rendered.layer_body = loess + rendered.layer_body;
+		return;
+	}
+	if (layer.stat == "summary") {
+		string group_by = "x";
+		if (HasAesthetic(stmt, "color")) {
+			group_by += ", color";
+		}
+		if (HasAesthetic(stmt, "facet")) {
+			group_by += ", facet";
+		}
+		if (HasAesthetic(stmt, "facet2")) {
+			group_by += ", facet2";
+		}
+		rendered.data_sql = "SELECT " + group_by + ", AVG(y) AS y FROM (" + projected_sql +
+		                    ") GROUP BY " + group_by + " ORDER BY x";
+		return;
+	}
+}
+
 MarkResult RenderLayer(ClientContext &context, const VisualizeStatement &stmt,
                        const DrawLayer &layer, const string &projected_sql) {
 	const auto &info = LookupMark(context, layer.mark);
@@ -65,7 +109,9 @@ MarkResult RenderLayer(ClientContext &context, const VisualizeStatement &stmt,
 		}
 	}
 	MarkContext ctx{stmt.aesthetics, projected_sql};
-	return info.render(ctx);
+	MarkResult rendered = info.render(ctx);
+	ApplyStat(rendered, stmt, layer, projected_sql);
+	return rendered;
 }
 
 bool HasFacet(const VisualizeStatement &stmt) {

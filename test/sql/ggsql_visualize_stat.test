@@ -1,0 +1,99 @@
+# name: test/sql/ggsql_visualize_stat.test
+# description: ggsql per-layer `STAT smooth|summary|identity` modifier
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE samples AS SELECT * FROM (VALUES
+    (1.0, 2.1, 'a'), (2.0, 3.9, 'a'), (3.0, 6.2, 'a'),
+    (1.0, 1.8, 'b'), (2.0, 4.1, 'b'), (3.0, 5.8, 'b'),
+    (1.0, 2.0, 'a'), (2.0, 4.0, 'b'), (3.0, 6.0, 'a')
+) AS t(xv, yv, grp);
+
+# STAT identity is the explicit no-op — spec is byte-identical to the
+# bare DRAW point form.
+query TT
+VISUALIZE xv AS x, yv AS y FROM samples DRAW point STAT identity
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT xv AS x, yv AS y FROM samples'}
+
+# STAT smooth injects a Vega-Lite loess transform on (x, y).
+query TT
+VISUALIZE xv AS x, yv AS y FROM samples DRAW point STAT smooth
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"transform":[{"loess":"y","on":"x"}],"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT xv AS x, yv AS y FROM samples'}
+
+# STAT smooth on a `line` mark — loess transform applied; data_sql keeps
+# its ORDER BY x (line's stock behaviour).
+query TT
+VISUALIZE xv AS x, yv AS y FROM samples DRAW line STAT smooth
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"transform":[{"loess":"y","on":"x"}],"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT * FROM (SELECT xv AS x, yv AS y FROM samples) ORDER BY x'}
+
+# STAT smooth with a mapped color → loess transform groups by color so
+# each category gets its own smoothed curve.
+query TT
+VISUALIZE xv AS x, yv AS y, grp AS color FROM samples DRAW point STAT smooth
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"transform":[{"loess":"y","on":"x","groupby":["color"]}],"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}	{layer_0='SELECT xv AS x, yv AS y, grp AS color FROM samples'}
+
+# STAT summary rewrites data_sql to AVG(y) GROUP BY x ORDER BY x.
+# Spec stays as the bare mark (transform happens in SQL).
+query TT
+VISUALIZE xv AS x, yv AS y FROM samples DRAW point STAT summary
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT x, AVG(y) AS y FROM (SELECT xv AS x, yv AS y FROM samples) GROUP BY x ORDER BY x'}
+
+# STAT summary extends the GROUP BY when color is mapped — one mean per
+# (x, color) cell.
+query TT
+VISUALIZE xv AS x, yv AS y, grp AS color FROM samples DRAW line STAT summary
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"},"color":{"field":"color","type":"nominal"}}}	{layer_0='SELECT x, color, AVG(y) AS y FROM (SELECT xv AS x, yv AS y, grp AS color FROM samples) GROUP BY x, color ORDER BY x'}
+
+# STAT summary with FACET BY — group includes facet so each facet cell
+# computes its own mean per x.
+query TT
+VISUALIZE xv AS x, yv AS y FROM samples DRAW point STAT summary FACET BY grp
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"facet":{"field":"facet","type":"nominal"},"spec":{"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}}	{layer_0='SELECT x, facet, AVG(y) AS y FROM (SELECT xv AS x, yv AS y, grp AS facet FROM samples) GROUP BY x, facet ORDER BY x'}
+
+# Multi-layer composition: raw points + smoothed overlay in one VISUALIZE.
+query TT
+VISUALIZE xv AS x, yv AS y FROM samples DRAW point DRAW line STAT smooth
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","layer":[{"data":{"name":"layer_0"},"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}},{"data":{"name":"layer_1"},"transform":[{"loess":"y","on":"x"}],"mark":"line","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}]}	{layer_0='SELECT xv AS x, yv AS y FROM samples', layer_1='SELECT * FROM (SELECT xv AS x, yv AS y FROM samples) ORDER BY x'}
+
+# ── Error cases ─────────────────────────────────────────────────────────────
+
+# Unknown stat name — parser rejects.
+statement error
+VISUALIZE xv AS x, yv AS y FROM samples DRAW point STAT loess
+----
+Unknown stat 'loess'
+
+# STAT without a name.
+statement error
+VISUALIZE xv AS x, yv AS y FROM samples DRAW point STAT
+----
+Expected stat name after 'STAT'
+
+# STAT smooth on a mark that already emits its own transform (regression,
+# density, violin, histogram) is rejected — two `transform:` keys would
+# produce invalid Vega-Lite.
+statement error
+VISUALIZE xv AS x, yv AS y FROM samples DRAW regression STAT smooth
+----
+STAT smooth is not allowed on 'regression'
+
+statement error
+VISUALIZE xv AS x FROM samples DRAW density STAT smooth
+----
+STAT smooth is not allowed on 'density'
+
+# STAT is case-insensitive (keyword) and the stat name normalises to lower.
+query TT
+VISUALIZE xv AS x, yv AS y FROM samples DRAW point stat SMOOTH
+----
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"name":"layer_0"},"transform":[{"loess":"y","on":"x"}],"mark":"point","encoding":{"x":{"field":"x","type":"quantitative"},"y":{"field":"y","type":"quantitative"}}}	{layer_0='SELECT xv AS x, yv AS y FROM samples'}

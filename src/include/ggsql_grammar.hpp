@@ -10,6 +10,11 @@ namespace ggsql {
 
 struct DrawLayer {
 	string mark;
+	// Optional STAT modifier. Empty or "identity" means no transform. "smooth"
+	// injects a Vega-Lite loess transform on (x, y). "summary" rewrites the
+	// layer's data SQL to aggregate by x (and color / facet if mapped) with
+	// AVG(y). Unknown names are rejected at parse time.
+	string stat;
 };
 
 struct ScaleSpec {

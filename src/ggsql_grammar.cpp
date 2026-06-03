@@ -322,6 +322,23 @@ ParseResult ParseGgsql(const string &query) {
 		}
 		DrawLayer layer;
 		layer.mark = tokens[i++];
+		// Optional `STAT <name>` modifier — applies a per-layer transform.
+		// Recognized: identity (no-op), smooth (loess on y ~ x), summary
+		// (aggregate AVG(y) by x). Unknown stat names are a parse error.
+		if (!at_end() && IEqual(peek(), "STAT")) {
+			i++;
+			if (at_end()) {
+				result.error = "Expected stat name after 'STAT'";
+				return result;
+			}
+			string stat_name = StringUtil::Lower(tokens[i++]);
+			if (stat_name != "identity" && stat_name != "smooth" && stat_name != "summary") {
+				result.error = "Unknown stat '" + stat_name +
+				               "' (expected identity, smooth, or summary)";
+				return result;
+			}
+			layer.stat = std::move(stat_name);
+		}
 		result.stmt.layers.push_back(std::move(layer));
 	}
 

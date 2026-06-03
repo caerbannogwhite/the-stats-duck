@@ -12,6 +12,17 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- ggsql: per-layer `STAT smooth | summary | identity` modifier — appended
+  after a mark name as `DRAW <mark> STAT <name>`. `smooth` injects a
+  Vega-Lite loess transform on `(x, y)` and groups by `color` when mapped
+  (rejected on marks that already emit their own transform — `regression`,
+  `density`, `violin`, `histogram`). `summary` rewrites the layer's data
+  SQL to `AVG(y) GROUP BY x [, color, facet, facet2] ORDER BY x` so each
+  cell collapses to its mean. `identity` is the explicit no-op. Multi-
+  layer composition like `DRAW point DRAW line STAT smooth` produces the
+  canonical scatter-with-LOESS overlay without a separate transform
+  function.
+
 - ggsql: 2D `FACET BY <row_expr>, <col_expr>` — two comma-separated
   expressions produce a row × column grid via vega-lite's facet operator
   with both `row` and `column` sub-channels. Composes with `SCALE`,

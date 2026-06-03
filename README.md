@@ -260,7 +260,7 @@ runs each layer's SQL and feeds the rows to vega-embed via the `datasets` API.
 [WITH [RECURSIVE] <cte> AS (...) [, <cte> AS (...)]*]
 VISUALIZE <expr> AS <aesthetic> [: <type>] (, <expr> AS <aesthetic> ...)
 FROM <table>
-DRAW <mark> (DRAW <mark>)*
+DRAW <mark> [STAT <identity|smooth|summary>] (DRAW <mark> [STAT ...])*
 [FACET BY <expr> [ROWS | COLS] | FACET BY <row_expr>, <col_expr>]
 [SCALE <channel> {TO <scheme> | ZERO true|false | DOMAIN <lo> <hi> | LABEL '<text>'}]*
 [TITLE '<text>' [SUBTITLE '<text>']]
@@ -515,6 +515,14 @@ DRAW point FACET BY species ROWS;
 ```sql
 VISUALIZE bill_len AS x, bill_dep AS y FROM penguins
 DRAW point FACET BY species, sex;
+```
+
+#### Scatter with LOESS overlay via STAT smooth
+
+```sql
+VISUALIZE bill_len AS x, bill_dep AS y FROM penguins
+DRAW point
+DRAW line STAT smooth;
 ```
 
 #### SQL expressions in mappings
