@@ -184,7 +184,7 @@ SELECT * FROM table_one(
 ```
 
 Output columns (long format, fixed schema):
-`variable`, `level`, `statistic`, `stratum`, `display`, `p_value`
+`variable`, `level`, `statistic`, `stratum`, `display`, `p_value`, `effect_size`
 
 - Each numeric variable yields rows for `n`, `missing`, `mean (sd)`,
   `median [q1, q3]`, `min, max` — `level` is NULL.
@@ -203,6 +203,12 @@ Output columns (long format, fixed schema):
   ANOVA (`anova_oneway`); categorical variables use chi-square independence
   (`chisq_independence`). NULL when the underlying test is infeasible (zero
   variance, too few samples).
+- `effect_size` is the matching magnitude — **η² (eta-squared)** for
+  numeric variables (from ANOVA's `ss_between / ss_total`), **Cramér's V**
+  for categorical (`√(χ² / (n · (min(rows, cols) - 1)))`). Both are in
+  [0, 1] and larger means stronger association, so a single uniform
+  column name works across kinds. Same repetition and NULL handling as
+  `p_value`.
 - Variable types are auto-classified from the catalog: integer / floating-
   point types are numeric, everything else (VARCHAR, BOOLEAN, ENUM,
   date/time) is categorical. Override per-variable with

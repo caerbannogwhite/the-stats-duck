@@ -46,19 +46,25 @@ struct TableOneRow {
 	// stratum or when the underlying test fails (e.g. zero variance, too few
 	// samples).
 	double p_value;
+	// Between-group effect size: η² for numeric (from ANOVA's eta_squared);
+	// Cramér's V for categorical (sqrt(χ²/(n · (min(r,c)-1)))). NaN under the
+	// same conditions as p_value. Same uniform name across both — the
+	// variable's row's `statistic` field implicitly tells the consumer which.
+	double effect_size;
 
 	// Explicit constructor so 5-arg brace-init calls (the existing pattern in
-	// EmitNumericRows / EmitCategoricalRows) keep working with p_value
-	// defaulted to NaN. A C++17 NSDMI default would also work under MSVC, but
-	// emscripten's libc++ rejects brace-init of an aggregate with NSDMIs
-	// when the brace list is shorter than the field count — the constructor
-	// form is portable across both toolchains.
+	// EmitNumericRows / EmitCategoricalRows) keep working with p_value and
+	// effect_size defaulted to NaN. A C++17 NSDMI default would also work
+	// under MSVC, but emscripten's libc++ rejects brace-init of an aggregate
+	// with NSDMIs when the brace list is shorter than the field count — the
+	// constructor form is portable across both toolchains.
 	TableOneRow(std::string variable, std::string level, std::string statistic,
 	            std::string stratum, std::string display,
-	            double p_value = std::nan(""))
+	            double p_value = std::nan(""),
+	            double effect_size = std::nan(""))
 	    : variable(std::move(variable)), level(std::move(level)),
 	      statistic(std::move(statistic)), stratum(std::move(stratum)),
-	      display(std::move(display)), p_value(p_value) {
+	      display(std::move(display)), p_value(p_value), effect_size(effect_size) {
 	}
 };
 
@@ -277,9 +283,12 @@ static unique_ptr<FunctionData> TableOneBind(ClientContext &context, TableFuncti
 	// repeated on every row of the same variable so a PIVOT can grab it via
 	// FIRST(p_value). NULL when no `by` is set, when there's only one
 	// stratum, or when the test failed.
-	names = {"variable", "level", "statistic", "stratum", "display", "p_value"};
+	// effect_size is the matching effect-size magnitude (η² for numeric,
+	// Cramér's V for categorical) — same repetition and NULL handling.
+	names = {"variable", "level", "statistic", "stratum", "display", "p_value", "effect_size"};
 	return_types = {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR,
-	                LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::DOUBLE};
+	                LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::DOUBLE,
+	                LogicalType::DOUBLE};
 	return std::move(bd);
 }
 
@@ -447,12 +456,18 @@ static void EmitCategoricalRows(Connection &conn, const std::string &table,
 //!
 //! Multi-column `by` is folded into a single grouping string by concatenating
 //! the columns with " / " — same separator used for stratum labels.
-static double ComputeBetweenGroupPValue(Connection &conn, const std::string &table,
-                                        const std::string &var, bool numeric,
-                                        const std::vector<std::string> &by_cols,
-                                        idx_t n_strata) {
+struct BetweenGroupStats {
+	double p_value = std::nan("");
+	double effect_size = std::nan("");
+};
+
+static BetweenGroupStats ComputeBetweenGroupStats(Connection &conn, const std::string &table,
+                                                  const std::string &var, bool numeric,
+                                                  const std::vector<std::string> &by_cols,
+                                                  idx_t n_strata) {
+	BetweenGroupStats stats;
 	if (by_cols.empty() || n_strata < 2) {
-		return std::nan("");
+		return stats;
 	}
 
 	// Build the grouping expression: single column verbatim, multi-column
@@ -475,28 +490,42 @@ static double ComputeBetweenGroupPValue(Connection &conn, const std::string &tab
 		where_clause += " AND " + QuoteIdent(b) + " IS NOT NULL";
 	}
 
+	// One SELECT pulls p_value and effect_size from the same aggregate struct,
+	// so the aggregate runs once per variable rather than twice.
+	//   Numeric: anova_oneway exposes p_value and eta_squared directly.
+	//   Categorical: chisq_independence exposes chi_square, n, n_rows, n_cols;
+	//     Cramér's V is √(χ²/(n · (min(r,c)-1))) computed inline.
 	std::stringstream sql;
 	if (numeric) {
-		sql << "SELECT (anova_oneway(" << QuoteIdent(var) << "::DOUBLE, " << group_expr
-		    << ")).p_value FROM " << QuoteIdent(table) << " WHERE " << where_clause;
+		sql << "SELECT (s).p_value, (s).eta_squared FROM ("
+		    << "SELECT anova_oneway(" << QuoteIdent(var) << "::DOUBLE, " << group_expr << ") AS s "
+		    << "FROM " << QuoteIdent(table) << " WHERE " << where_clause << ")";
 	} else {
-		sql << "SELECT (chisq_independence(" << QuoteIdent(var) << "::VARCHAR, " << group_expr
-		    << ")).p_value FROM " << QuoteIdent(table) << " WHERE " << where_clause;
+		sql << "SELECT (s).p_value, "
+		    << "CASE WHEN (s).n > 0 AND LEAST((s).n_rows, (s).n_cols) > 1 "
+		    << "THEN sqrt((s).chi_square / ((s).n * (LEAST((s).n_rows, (s).n_cols) - 1))) "
+		    << "ELSE NULL END "
+		    << "FROM (SELECT chisq_independence(" << QuoteIdent(var) << "::VARCHAR, " << group_expr
+		    << ") AS s FROM " << QuoteIdent(table) << " WHERE " << where_clause << ")";
 	}
 
 	auto result = conn.Query(sql.str());
 	if (result->HasError()) {
-		return std::nan(""); // test infeasible (e.g. zero variance, sparse 2x2) → NULL
+		return stats; // test infeasible (e.g. zero variance, sparse 2x2) → NULL
 	}
 	auto chunk = result->Fetch();
 	if (!chunk || chunk->size() == 0) {
-		return std::nan("");
+		return stats;
 	}
-	auto v = chunk->GetValue(0, 0);
-	if (v.IsNull()) {
-		return std::nan("");
+	auto p_v = chunk->GetValue(0, 0);
+	if (!p_v.IsNull()) {
+		stats.p_value = p_v.GetValue<double>();
 	}
-	return v.GetValue<double>();
+	auto eff = chunk->GetValue(1, 0);
+	if (!eff.IsNull()) {
+		stats.effect_size = eff.GetValue<double>();
+	}
+	return stats;
 }
 
 // ── InitGlobal: pre-compute every row ──────────────────────────────────────
@@ -591,13 +620,14 @@ static unique_ptr<GlobalTableFunctionState> TableOneInitGlobal(ClientContext &co
 			}
 		}
 
-		// Compute the between-group p-value once per variable, then stamp it
-		// on every row we just emitted for this variable. NaN sentinel →
-		// Execute will SetNull on those cells.
-		double p_value = ComputeBetweenGroupPValue(conn, bd.data_table, var, numeric,
-		                                            bd.by_columns, by_tuples.size());
+		// Compute the between-group p-value and effect size once per variable,
+		// then stamp both on every row we just emitted for this variable. NaN
+		// sentinels → Execute will SetNull on those cells.
+		auto stats = ComputeBetweenGroupStats(conn, bd.data_table, var, numeric,
+		                                       bd.by_columns, by_tuples.size());
 		for (size_t i = first_row; i < state->rows.size(); i++) {
-			state->rows[i].p_value = p_value;
+			state->rows[i].p_value = stats.p_value;
+			state->rows[i].effect_size = stats.effect_size;
 		}
 	};
 
@@ -629,6 +659,11 @@ static void TableOneExecute(ClientContext &context, TableFunctionInput &input, D
 			FlatVector::SetNull(output.data[5], emitted, true);
 		} else {
 			output.SetValue(5, emitted, Value::DOUBLE(row.p_value));
+		}
+		if (std::isnan(row.effect_size)) {
+			FlatVector::SetNull(output.data[6], emitted, true);
+		} else {
+			output.SetValue(6, emitted, Value::DOUBLE(row.effect_size));
 		}
 		emitted++;
 	}

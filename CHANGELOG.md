@@ -12,6 +12,17 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- `table_one`: new `effect_size` output column carrying the between-group
+  magnitude alongside `p_value`. Numeric variables get **η² (eta-squared)**
+  from `anova_oneway` (`ss_between / ss_total`); categorical variables
+  get **Cramér's V** computed inline as `√(χ²/(n · (min(rows, cols) - 1)))`
+  from `chisq_independence`. Both are in [0, 1] and larger means stronger
+  association, so a single uniform column name works across kinds — the
+  variable's `statistic` rows tell the consumer which is which. NULL under
+  the same conditions as `p_value` (no `by`, single stratum, test
+  infeasible). Repeated on every row of a variable so a downstream PIVOT
+  can grab it via `FIRST(effect_size)`.
+
 - **Weibull, log-normal, and Poisson distribution functions** — d/p/q
   triples in the same R-style API as the existing distribution families.
   `dweibull(x, shape, [scale])` / `pweibull` / `qweibull` (scale defaults

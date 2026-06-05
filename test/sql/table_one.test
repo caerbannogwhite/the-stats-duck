@@ -16,17 +16,17 @@ CREATE TABLE patients AS SELECT * FROM (VALUES
     (NULL, 'M', 27.4, 'B')
 ) AS t(age, sex, bmi, arm);
 
-# ─── Output schema is fixed (variable, level, statistic, stratum, display, p_value) ────
+# ─── Output schema is fixed (variable, level, statistic, stratum, display, p_value, effect_size) ────
 
-# Without `by`: p_value is NULL on every row (nothing to compare against).
-query TTTTTR
+# Without `by`: p_value and effect_size are NULL on every row (nothing to compare against).
+query TTTTTRR
 SELECT * FROM table_one('patients', variables := ['age']) ORDER BY statistic
 ----
-age	NULL	mean (sd)	Overall	55.6 (7.2)	NULL
-age	NULL	median [q1, q3]	Overall	54.2 [51.3, 59.6]	NULL
-age	NULL	min, max	Overall	45.7, 67.1	NULL
-age	NULL	missing	Overall	1	NULL
-age	NULL	n	Overall	7	NULL
+age	NULL	mean (sd)	Overall	55.6 (7.2)	NULL	NULL
+age	NULL	median [q1, q3]	Overall	54.2 [51.3, 59.6]	NULL	NULL
+age	NULL	min, max	Overall	45.7, 67.1	NULL	NULL
+age	NULL	missing	Overall	1	NULL	NULL
+age	NULL	n	Overall	7	NULL	NULL
 
 # ─── Numeric variable rows ──────────────────────────────────────────────────
 
@@ -337,3 +337,53 @@ SELECT DISTINCT p_value FROM table_one('staged_by_arm',
     force_categorical := ['stage'])
 ----
 0.223130
+
+# ─── effect_size column ────────────────────────────────────────────────────
+
+# Without `by`, effect_size is NULL on every row (same as p_value).
+query R
+SELECT DISTINCT effect_size FROM table_one('patients', variables := ['age'])
+----
+NULL
+
+# Numeric variable + by: effect_size is η² from the ANOVA. For age (means
+# 55.x in both arms) variance is mostly within-arm → η² is small.
+query R
+SELECT DISTINCT round(effect_size, 4) FROM table_one('patients',
+    variables := ['age'], by := ['arm'])
+----
+0.0179
+
+# Categorical variable + by: effect_size is Cramér's V. For sex with an
+# identical contingency table per arm, V = 0.
+query R
+SELECT DISTINCT effect_size FROM table_one('patients',
+    variables := ['sex'], by := ['arm'])
+----
+0
+
+# η² and Cramér's V are both in [0, 1] and stamped on every row of the
+# variable (so a downstream PIVOT can grab one via FIRST(effect_size)).
+query R
+SELECT COUNT(DISTINCT effect_size) FROM table_one('patients',
+    variables := ['age', 'bmi', 'sex'], by := ['arm'])
+WHERE effect_size IS NOT NULL
+----
+3
+
+# Same uniform name across numeric (η²) and categorical (Cramér's V): both
+# rows have a non-NULL effect_size when the test fires.
+query TR
+SELECT DISTINCT variable, round(effect_size, 4) FROM table_one('staged_by_arm',
+    variables := ['stage'], by := ['arm'])
+ORDER BY variable
+----
+stage	0.3636
+
+query TR
+SELECT DISTINCT variable, round(effect_size, 4) FROM table_one('staged_by_arm',
+    variables := ['stage'], by := ['arm'],
+    force_categorical := ['stage'])
+ORDER BY variable
+----
+stage	0.6124
