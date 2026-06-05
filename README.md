@@ -167,6 +167,7 @@ gives Q1=1.5 / Q3=3.5 (matching SAS PROC MEANS).
 | `poibin_cdf(probs LIST<DOUBLE>, k BIGINT)` | Poisson Binomial CDF — `P(X ≤ k)` for `X = Σᵢ Bᵢ`, `Bᵢ ∼ Bernoulli(pᵢ)` |
 | `bin_edges(x [, method])` *(aggregate)* | Auto bin-edge vector for `x` — `sturges` (default), `fd`, `scott`, `sqrt`, `rice`, `auto` |
 | `bin_label(x, edges)` | Label for the bin containing `x` given an edge vector (typically from `bin_edges`) |
+| `bootstrap(x, statistic, n_iters [, seed])` *(aggregate)* | With-replacement resampling — emits `LIST<DOUBLE>` of length `n_iters`. `statistic` ∈ `{mean, median, sum, stddev, variance, min, max}` |
 
 ### Table 1 summary (table function)
 

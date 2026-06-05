@@ -12,6 +12,22 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- **`bootstrap(value DOUBLE, statistic VARCHAR, n_iters BIGINT [, seed BIGINT])`
+  → LIST<DOUBLE>** — buffer-based aggregate that resamples the input with
+  replacement `n_iters` times and emits the chosen summary statistic for
+  each resample. `statistic` ∈ `{mean, median, sum, stddev (alias sd),
+  variance (alias var), min, max}`. When `seed` is provided the RNG
+  (std::mt19937_64) is seeded deterministically — mixed with the per-row
+  index so multi-group `GROUP BY` bootstraps produce stable but distinct
+  streams. Empty input → NULL list. Composes naturally with `list_quantile`
+  for percentile CIs:
+  ```
+  WITH b AS (SELECT bootstrap(price, 'mean', 1000, 42) AS samples FROM t)
+  SELECT list_quantile(samples, 0.025) AS lo,
+         list_quantile(samples, 0.975) AS hi
+  FROM b;
+  ```
+
 - `table_one`: new `effect_size` output column carrying the between-group
   magnitude alongside `p_value`. Numeric variables get **η² (eta-squared)**
   from `anova_oneway` (`ss_between / ss_total`); categorical variables

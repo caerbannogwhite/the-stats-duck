@@ -1,0 +1,144 @@
+# name: test/sql/bootstrap.test
+# description: bootstrap(value, statistic, n_iters [, seed]) — with-replacement resampling aggregate
+# group: [stats_duck]
+
+require stats_duck
+
+statement ok
+CREATE TABLE t AS SELECT * FROM (VALUES
+    (1.0), (2.0), (3.0), (4.0), (5.0),
+    (6.0), (7.0), (8.0), (9.0), (10.0)
+) AS v(x);
+
+# ─── Shape ──────────────────────────────────────────────────────────────────
+
+# n_iters resamples → LIST length = n_iters.
+query I
+SELECT len(bootstrap(x, 'mean', 100, 42)) FROM t
+----
+100
+
+# All elements are doubles (no NaN/NULL with non-empty input + n ≥ 1 for the
+# stats that need it).
+query I
+SELECT len(list_filter(bootstrap(x, 'mean', 50, 7), v -> v IS NOT NULL)) FROM t
+----
+50
+
+# ─── Statistic correctness on the bootstrap mean ────────────────────────────
+
+# The bootstrap mean of means converges to the sample mean — for n_iters=2000
+# the round-to-1-dp answer is the sample mean exactly.
+query R
+SELECT round(list_aggregate(bootstrap(x, 'mean', 2000, 1), 'avg'), 1) FROM t
+----
+5.5
+
+# Average bootstrap median ≈ sample median. Discrete sample of {1..10} means
+# the bootstrap median lands on a small set of values.
+query R
+SELECT round(list_aggregate(bootstrap(x, 'median', 2000, 2), 'avg'), 1) FROM t
+----
+5.5
+
+# Bootstrap sum has expectation = sample sum (each resample sums n values
+# drawn with replacement from {1..10}, so mean(sum) = n · mean(x) = 55).
+query R
+SELECT round(list_aggregate(bootstrap(x, 'sum', 2000, 3), 'avg'), 0) FROM t
+----
+55
+
+# ─── Determinism with seed ──────────────────────────────────────────────────
+
+# Same seed → identical LIST<DOUBLE>.
+query I
+SELECT bootstrap(x, 'mean', 10, 99) = bootstrap(x, 'mean', 10, 99) FROM t
+----
+true
+
+# Different seed → different LIST<DOUBLE> with overwhelming probability.
+query I
+SELECT bootstrap(x, 'mean', 10, 1) <> bootstrap(x, 'mean', 10, 2) FROM t
+----
+true
+
+# ─── GROUP BY semantics ─────────────────────────────────────────────────────
+
+statement ok
+CREATE TABLE grouped AS SELECT * FROM (VALUES
+    ('a', 1.0), ('a', 2.0), ('a', 3.0),
+    ('b', 10.0), ('b', 20.0), ('b', 30.0)
+) AS t(g, x);
+
+# Each group produces its own bootstrap distribution; n_iters rows per group.
+query TI
+SELECT g, len(bootstrap(x, 'mean', 50, 42)) FROM grouped GROUP BY g ORDER BY g
+----
+a	50
+b	50
+
+# Per-group means: group 'a' centres on 2, group 'b' centres on 20.
+query TR
+SELECT g, round(list_aggregate(bootstrap(x, 'mean', 1000, 42), 'avg'), 0)
+FROM grouped GROUP BY g ORDER BY g
+----
+a	2
+b	20
+
+# ─── Stddev / variance ──────────────────────────────────────────────────────
+
+# Bootstrap stddev produces a list of n_iters non-negative doubles.
+query I
+SELECT len(list_filter(bootstrap(x, 'stddev', 100, 5), v -> v >= 0)) FROM t
+----
+100
+
+# 'sd' is an alias for 'stddev'; 'var' for 'variance'. Same seed → identical
+# output as the long name.
+query I
+SELECT bootstrap(x, 'stddev', 20, 11) = bootstrap(x, 'sd', 20, 11) FROM t
+----
+true
+
+query I
+SELECT bootstrap(x, 'variance', 20, 11) = bootstrap(x, 'var', 20, 11) FROM t
+----
+true
+
+# ─── Edge cases / errors ────────────────────────────────────────────────────
+
+# Empty input → NULL list.
+query I
+SELECT bootstrap(x, 'mean', 100, 1) IS NULL FROM (SELECT 1.0 AS x WHERE FALSE) t
+----
+true
+
+# NULLs in the input are skipped (consistent with buffer-aggregate convention).
+query I
+SELECT len(bootstrap(x, 'mean', 50, 1))
+FROM (VALUES (1.0), (NULL), (3.0), (NULL), (5.0)) AS t(x)
+----
+50
+
+# Unknown statistic → bind error.
+statement error
+SELECT bootstrap(x, 'mode', 100) FROM t
+----
+unknown statistic 'mode'
+
+# Non-constant statistic → bind error (must be foldable).
+statement error
+SELECT bootstrap(x, CASE WHEN random() < 0.5 THEN 'mean' ELSE 'median' END, 100) FROM t
+----
+'statistic' must be a constant string
+
+# n_iters must be > 0.
+statement error
+SELECT bootstrap(x, 'mean', 0) FROM t
+----
+'n_iters' must be > 0
+
+statement error
+SELECT bootstrap(x, 'mean', -5) FROM t
+----
+'n_iters' must be > 0

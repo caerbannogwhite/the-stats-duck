@@ -11,6 +11,7 @@
 #include "sign_test_function.hpp"
 #include "adjust_p_function.hpp"
 #include "poibin_function.hpp"
+#include "bootstrap_function.hpp"
 #include "auto_bin_function.hpp"
 #include "corr_matrix_function.hpp"
 #include "table_one_function.hpp"
@@ -57,6 +58,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Poisson Binomial CDF
 	RegisterPoibinCdf(loader);
+
+	// Bootstrap (with-replacement resampling aggregate)
+	RegisterBootstrap(loader);
 
 	// Auto-binning helpers
 	RegisterBinEdges(loader);
