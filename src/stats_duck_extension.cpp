@@ -5,6 +5,7 @@
 #include "ttest_agg_function.hpp"
 #include "nonparametric_function.hpp"
 #include "distribution_functions.hpp"
+#include "random_sampling_function.hpp"
 #include "summary_stats_function.hpp"
 #include "correlation_function.hpp"
 #include "rank_correlation_function.hpp"
@@ -52,6 +53,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Scalar distribution functions (dnorm/pnorm/qnorm/dt/pt/qt/dchisq/...)
 	RegisterDistributionFunctions(loader);
+
+	// Random sampling — per-row inverse-CDF on a thread-local RNG (rnorm/rt/...)
+	RegisterRandomSampling(loader);
 
 	// Multiple-testing corrections
 	RegisterAdjustP(loader);

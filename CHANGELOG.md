@@ -12,6 +12,20 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- **Random sampling functions** — completes the d/p/q/**r** quartet for every
+  distribution family currently in the extension: `rnorm([mean=0, sd=1])`,
+  `rt(df)`, `rchisq(df)`, `rf(df1, df2)`, `rgamma(shape, [rate=1])`,
+  `rbeta(alpha, beta)`, `rexp([rate=1])`, `rweibull(shape, [scale=1])`,
+  `rlnorm([meanlog=0, sdlog=1])`, `rpois(lambda)`. Per-row inverse-CDF on a
+  thread-local `std::mt19937_64` (seeded from `std::random_device` on first
+  use). The functions are marked VOLATILE and use explicit per-row loops
+  rather than `UnaryExecutor` / `BinaryExecutor` so that constant-vector
+  parameter inputs (`rnorm(0, 1)`) don't trip the per-chunk-cache fast path
+  that would otherwise produce only ~N/vector_size unique values across an
+  N-row scan. Uniform draws use the bit-shift method on the top 53 bits of a
+  single mt19937_64 draw (MSVC's `uniform_real_distribution` /
+  `generate_canonical` have biased tails on the platform we ship today).
+
 - **`bootstrap(value DOUBLE, statistic VARCHAR, n_iters BIGINT [, seed BIGINT])`
   → LIST<DOUBLE>** — buffer-based aggregate that resamples the input with
   replacement `n_iters` times and emits the chosen summary statistic for

@@ -1,0 +1,166 @@
+# name: test/sql/random_sampling.test
+# description: rnorm / rt / rchisq / rf / rgamma / rbeta / rexp / rweibull / rlnorm / rpois
+# group: [stats_duck]
+
+require stats_duck
+
+# ─── Per-row uniqueness ─────────────────────────────────────────────────────
+#
+# All r* functions are VOLATILE and use explicit per-row loops (not
+# UnaryExecutor / BinaryExecutor) so constant-vector inputs don't get the
+# "compute once per chunk" optimisation. Over 10k rows we expect every
+# value to be distinct.
+
+query I
+SELECT count(*) = count(DISTINCT v) FROM (SELECT rnorm() AS v FROM range(10000))
+----
+true
+
+query I
+SELECT count(*) = count(DISTINCT v) FROM (SELECT rnorm(0, 1) AS v FROM range(10000))
+----
+true
+
+query I
+SELECT count(*) = count(DISTINCT v) FROM (SELECT rexp(2.0) AS v FROM range(10000))
+----
+true
+
+query I
+SELECT count(*) = count(DISTINCT v) FROM (SELECT rgamma(2.0, 3.0) AS v FROM range(10000))
+----
+true
+
+# ─── Distribution moments converge to theory ────────────────────────────────
+#
+# Sample size 50000 chosen so the simple mean/sd checks pass deterministically.
+# These probes target moments that are robust to the seed used by the
+# thread-local std::mt19937_64.
+
+query R
+SELECT round(stddev(rnorm(0, 2)), 1) FROM range(50000)
+----
+2
+
+query R
+SELECT round(stddev(rnorm(10, 0.5)), 1) FROM range(50000)
+----
+0.5
+
+# Exponential mean = 1/rate. rate=2 → 0.5.
+query R
+SELECT round(avg(rexp(2.0)), 1) FROM range(50000)
+----
+0.5
+
+# Gamma(shape, rate) mean = shape/rate. shape=4, rate=2 → 2.0.
+query R
+SELECT round(avg(rgamma(4.0, 2.0)), 1) FROM range(50000)
+----
+2
+
+# Beta(α, β) mean = α/(α+β). Beta(2, 3) → 0.4.
+query R
+SELECT round(avg(rbeta(2.0, 3.0)), 1) FROM range(50000)
+----
+0.4
+
+# Beta support is [0, 1].
+query II
+SELECT
+    sum(CASE WHEN v < 0.0 OR v > 1.0 THEN 1 ELSE 0 END) AS out_of_support,
+    count(*) AS total
+FROM (SELECT rbeta(2.0, 3.0) AS v FROM range(50000))
+----
+0	50000
+
+# Weibull(shape=1, scale=s) = Exponential(1/s); mean = s.
+query R
+SELECT round(avg(rweibull(1.0, 5.0)), 1) FROM range(50000)
+----
+5
+
+# Log-normal: log(X) is N(meanlog, sdlog). We check the body via the log
+# moments rather than the raw lnorm mean because the latter has heavy right
+# tails that make 50k-sample rounding seed-dependent.
+query R
+SELECT round(avg(ln(rlnorm(0, 1))), 1) FROM range(50000)
+----
+0
+
+query R
+SELECT round(stddev(ln(rlnorm(2.5, 0.5))), 1) FROM range(50000)
+----
+0.5
+
+# Log-normal support is x > 0.
+query I
+SELECT sum(CASE WHEN v <= 0 THEN 1 ELSE 0 END) FROM (SELECT rlnorm() AS v FROM range(50000))
+----
+0
+
+# Poisson mean = lambda. Integer-valued.
+query R
+SELECT round(avg(rpois(4.0)), 1) FROM range(50000)
+----
+4
+
+query I
+SELECT sum(CASE WHEN v <> floor(v) THEN 1 ELSE 0 END) FROM (SELECT rpois(3.0) AS v FROM range(50000))
+----
+0
+
+# ─── df / df1, df2 thread through correctly ─────────────────────────────────
+
+# Chi-square(df) mean = df. df=8 → 8.
+query R
+SELECT round(avg(rchisq(8.0)), 0) FROM range(50000)
+----
+8
+
+# Student's t(df) mean = 0 for df > 1.
+query R
+SELECT round(avg(rt(5.0)), 1) FROM range(50000)
+----
+0
+
+# F(df1, df2) mean = df2/(df2-2) for df2 > 2. F(10, 8) → 1.333.
+query R
+SELECT round(avg(rf(10.0, 8.0)), 1) FROM range(50000)
+----
+1.3
+
+# ─── Per-row variation under a non-constant parameter column ───────────────
+
+# Variable parameter per row: each row's rnorm uses its own row-derived mean.
+# A row with i*1.0 mean and small sd should produce values close to that mean.
+query R
+SELECT round(avg(abs(v - x::DOUBLE)), 1) FROM (
+    SELECT x, rnorm(x::DOUBLE, 0.01) AS v FROM range(10000) t(x)
+)
+----
+0
+
+# ─── NULL handling ──────────────────────────────────────────────────────────
+
+# NULL parameter → NULL result.
+query I
+SELECT v IS NULL FROM (SELECT rnorm(NULL::DOUBLE, 1.0) AS v) t
+----
+true
+
+query I
+SELECT v IS NULL FROM (SELECT rexp(NULL::DOUBLE) AS v) t
+----
+true
+
+# Invalid parameters (e.g. rate <= 0) → NULL.
+query I
+SELECT v IS NULL FROM (SELECT rexp(0.0) AS v) t
+----
+true
+
+query I
+SELECT v IS NULL FROM (SELECT rnorm(0.0, -1.0) AS v) t
+----
+true

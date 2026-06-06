@@ -164,6 +164,10 @@ gives Q1=1.5 / Q3=3.5 (matching SAS PROC MEANS).
 | `dpois(k, lambda)`       | Poisson PMF (discrete) |
 | `ppois(q, lambda)`       | Poisson CDF |
 | `qpois(p, lambda)`       | Poisson quantile (integer search) |
+| `rnorm([mean], [sd])`    | Random sample from a normal — **volatile, per-row** |
+| `rt(df)` / `rchisq(df)` / `rf(df1, df2)` | Student-t / χ² / F samples |
+| `rgamma(shape, [rate])` / `rbeta(alpha, beta)` / `rexp([rate])` | Gamma / Beta / Exponential samples |
+| `rweibull(shape, [scale])` / `rlnorm([meanlog], [sdlog])` / `rpois(lambda)` | Weibull / Log-normal / Poisson samples |
 | `poibin_cdf(probs LIST<DOUBLE>, k BIGINT)` | Poisson Binomial CDF — `P(X ≤ k)` for `X = Σᵢ Bᵢ`, `Bᵢ ∼ Bernoulli(pᵢ)` |
 | `bin_edges(x [, method])` *(aggregate)* | Auto bin-edge vector for `x` — `sturges` (default), `fd`, `scott`, `sqrt`, `rice`, `auto` |
 | `bin_label(x, edges)` | Label for the bin containing `x` given an edge vector (typically from `bin_edges`) |

@@ -67,6 +67,7 @@ set(EXTENSION_SOURCES
     src/ttest_agg_function.cpp
     src/nonparametric_function.cpp
     src/distribution_functions.cpp
+    src/random_sampling_function.cpp
     src/summary_stats_function.cpp
     src/correlation_function.cpp
     src/rank_correlation_function.cpp
