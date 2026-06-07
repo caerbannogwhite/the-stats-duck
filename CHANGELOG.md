@@ -12,6 +12,24 @@ that name is preserved across releases for backward compatibility.
 
 ### Added
 
+- **`lm(table, y := 'col', x := ['c1', 'c2', ...])` and `lm_summary(...)`
+  table functions** — OLS linear regression via Cholesky decomposition of
+  `X'X`. `lm` returns one row per term (`(Intercept)` followed by each
+  predictor in user-supplied order) with columns
+  `(term VARCHAR, estimate, std_error, t_statistic, p_value)`. `lm_summary`
+  returns a single-row model summary
+  `(r_squared, adj_r_squared, f_statistic, f_p_value, df_model BIGINT,
+  df_residual BIGINT, sigma, n BIGINT)`. Both share a bind path and a fit
+  routine — calling `lm` and `lm_summary` with the same arguments fits the
+  model twice; collapse with a CTE if you need both shapes from one fit.
+  Complete-case row filtering (any NULL in y or any x drops the row) at
+  the SQL level so the OLS solver always sees a complete design matrix.
+  Cross-verified against R on the built-in `cars` (simple) and `mtcars`
+  (multi-predictor) datasets to ≥4 decimals on coefficients / standard
+  errors / R² / F. Singular `X'X` (e.g. perfectly collinear predictors) or
+  insufficient data (`n ≤ p + 1`) raises a clear bind error rather than
+  silently NaN'ing.
+
 - **Random sampling functions** — completes the d/p/q/**r** quartet for every
   distribution family currently in the extension: `rnorm([mean=0, sd=1])`,
   `rt(df)`, `rchisq(df)`, `rf(df1, df2)`, `rgamma(shape, [rate=1])`,

@@ -179,6 +179,7 @@ gives Q1=1.5 / Q3=3.5 (matching SAS PROC MEANS).
 | ------------------------------------------------- | ---------------------------------------------------------- |
 | `table_one(data, variables [, by])`               | Long-format descriptives table for mixed variable types    |
 | `corr_matrix(data, variables [, method])`         | Long-format pairwise correlation matrix (`pearson` / `spearman` / `kendall`) |
+| `lm(data, y, x)` / `lm_summary(data, y, x)`       | OLS regression — `lm` returns per-term coefficients, `lm_summary` returns model R² / F / σ |
 
 ```sql
 SELECT * FROM table_one(
@@ -229,6 +230,27 @@ PIVOT table_one('patients', variables := ['age', 'sex'], by := ['arm'])
     ON stratum USING first(display)
     GROUP BY variable, level, statistic;
 ```
+
+### Linear regression (table function)
+
+```sql
+SELECT * FROM lm('mtcars', y := 'mpg', x := ['wt', 'hp']);
+--   term        estimate  std_error  t_statistic  p_value
+--   (Intercept) 37.2273   1.5988     23.285       2.57e-20
+--   wt          -3.8778   0.6327     -6.129       1.12e-06
+--   hp          -0.0318   0.0090     -3.519       1.45e-03
+
+SELECT * FROM lm_summary('mtcars', y := 'mpg', x := ['wt', 'hp']);
+--   r_squared  adj_r_squared  f_statistic  f_p_value  df_model  df_residual  sigma  n
+--   0.8268     0.8148         69.21        9.11e-12   2         29           2.593  32
+```
+
+OLS via Cholesky decomposition of `X'X`. Rows with NULL in `y` or any `x` are
+dropped (complete-case). Term order follows the user-supplied `x` list, after
+the intercept. Calling `lm` and `lm_summary` with the same arguments fits the
+model twice — use a CTE if you need both shapes from a single fit. Errors on
+singular `X'X` (perfectly collinear predictors) or insufficient rows
+(`n ≤ p + 1`).
 
 ### Multiple-testing correction (scalar)
 
